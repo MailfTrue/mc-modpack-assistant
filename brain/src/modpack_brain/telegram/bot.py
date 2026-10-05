@@ -59,7 +59,13 @@ class TelegramBot:
         questions_per_user_per_day: int,
         bridge: Bridge | None = None,
     ) -> None:
-        self.bot = Bot(token, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
+        # Ответы бота — без звука (не спамим уведомлениями); события сервера задают звук явно в notify().
+        self.bot = Bot(
+            token,
+            default=DefaultBotProperties(
+                parse_mode=ParseMode.HTML, link_preview_is_disabled=True, disable_notification=True
+            ),
+        )
         self.assistant = assistant
         self.allowed = set(allowed_chat_ids)
         self.events_chat_id = events_chat_id
@@ -197,7 +203,7 @@ class TelegramBot:
             return
         await self.bridge.send({"type": "chat", "from": message.from_user.full_name, "text": text})
 
-    async def _send_answer(self, message: Message, text: str, session_id: str | None, *, silent: bool = False) -> None:
+    async def _send_answer(self, message: Message, text: str, session_id: str | None, *, silent: bool = True) -> None:
         target = message
         for chunk in render(text):
             try:
