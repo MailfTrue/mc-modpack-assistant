@@ -25,6 +25,8 @@ public final class BridgeConfig {
 	public Telegram telegram = new Telegram();
 	public Llm llm = new Llm();
 	public Events events = new Events();
+	/** Выгружать предметы и рецепты для ИИ при старте сервера и после /reload. */
+	public boolean export = true;
 
 	/** brain запускается сервером как дочерний процесс и останавливается вместе с ним. */
 	public static final class Brain {

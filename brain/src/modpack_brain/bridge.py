@@ -37,12 +37,14 @@ class Bridge:
         token: Callable[[], str | None],
         on_event: Handler,
         on_ai_question: Handler | None = None,
+        on_data_exported: Handler | None = None,
     ) -> None:
         self.host = host
         self.port = port
         self._token = token
         self._on_event = on_event
         self._on_ai_question = on_ai_question
+        self._on_data_exported = on_data_exported
         self._mod: ServerConnection | None = None
         self._server: Server | None = None
         self._ids = itertools.count(1)
@@ -135,6 +137,10 @@ class Bridge:
             future = self._requests.get(message.get("id"))  # type: ignore[arg-type]
             if future is not None and not future.done():
                 future.set_result(message)
+        elif kind == "data_exported" and self._on_data_exported is not None:
+            task = asyncio.create_task(self._safe(self._on_data_exported, message))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
         elif kind == "ai_question" and self._on_ai_question is not None:
             # Ответ ИИ идёт долго — не держим цикл чтения сообщений.
             task = asyncio.create_task(self._safe(self._on_ai_question, message))

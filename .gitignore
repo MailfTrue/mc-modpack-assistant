@@ -12,3 +12,6 @@ mod/build/
 mod/run/
 mod/.idea/
 *.iml
+
+# Отчёты eval — локальные
+brain/eval/reports/

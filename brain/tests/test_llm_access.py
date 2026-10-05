@@ -58,3 +58,10 @@ def test_web_allowed(server: Path):
 def test_glob_patterns_hitting_denied_files(server: Path, pattern: str):
     assert check_tool_access(server, "Glob", {"pattern": pattern}) is not None
     assert check_tool_access(server, "Grep", {"pattern": "x", "glob": pattern}) is not None
+
+
+def test_mcp_pack_tools_allowed_and_export_dir_closed(server: Path):
+    assert check_tool_access(server, "mcp__pack__find_item", {"query": "x"}) is None
+    assert check_tool_access(server, "mcp__other__x", {}) is not None
+    assert check_tool_access(server, "Read", {"file_path": "modpack-bridge/export/recipes.json"}) is not None
+    assert check_tool_access(server, "Grep", {"pattern": "x", "path": "modpack-bridge"}) is not None

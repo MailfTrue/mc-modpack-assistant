@@ -1,0 +1,71 @@
+# Эталонные вопросы для `uv run modpack-brain eval`.
+# expect — хотя бы одна из подстрок должна быть в ответе (без учёта регистра);
+# tools — эти инструменты должны быть вызваны (имя без префикса mcp__pack__).
+# Отчёт с ответами — в eval/reports/, проверять глазами: подстроки ловят только грубые промахи.
+
+[[question]]
+id = "start"
+text = "С чего начать в Prominence II?"
+expect = ["квест"]
+
+[[question]]
+id = "recipe-vanilla"
+text = "Как скрафтить железную кирку?"
+expect = ["iron", "желез"]
+tools = ["item_recipes"]
+
+[[question]]
+id = "recipe-modded"
+text = "Как сделать Treetap из Tech Reborn?"
+expect = ["treetap", "краник"]
+tools = ["item_recipes"]
+
+[[question]]
+id = "uses"
+text = "Где используется Refined Iron Ingot?"
+expect = ["refined iron", "очищен"]
+tools = ["item_recipes"]
+
+[[question]]
+id = "ru-name"
+text = "Как получить алмазный меч?"
+expect = ["diamond", "алмаз"]
+tools = ["find_item"]
+
+[[question]]
+id = "boss"
+text = "Где найти Gauntlet и на каком уровне его бить?"
+expect = ["15"]
+tools = ["search_quests"]
+
+[[question]]
+id = "netherite"
+text = "Как получить незерит в этой сборке?"
+expect = ["nether cit", "город"]
+
+[[question]]
+id = "progress"
+text = "Что нам делать дальше? Мы играем за mailf."
+expect = ["tech reborn", "getting started"]
+tools = ["team_progress"]
+
+[[question]]
+id = "level-cap"
+text = "Какой максимальный уровень персонажа и как открыть уровни выше 10?"
+expect = ["65", "50"]
+
+[[question]]
+id = "enchanting"
+text = "Как работает зачарование в этой сборке?"
+expect = ["zenith", "apotheosis", "eterna"]
+
+[[question]]
+id = "mods-tech"
+text = "Какие технические моды есть в сборке?"
+expect = ["tech reborn", "create", "modern industrialization"]
+tools = ["list_mods"]
+
+[[question]]
+id = "unknown"
+text = "Как скрафтить Unobtainium Hyper Sword?"
+expect = ["не нашёл", "нет", "не уверен", "не существует"]

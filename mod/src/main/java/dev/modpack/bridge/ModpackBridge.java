@@ -67,6 +67,12 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 			if (events.server) {
 				client.send(event("server_started"));
 			}
+			exportData(server);
+		});
+		ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> {
+			if (success) {
+				exportData(server);
+			}
 		});
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
 			if (events.server) {
@@ -106,6 +112,24 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 				client.send(json);
 			}
 		});
+	}
+
+	/** Выгрузка предметов и рецептов для ИИ в <сервер>/modpack-bridge/export (см. DataExport). */
+	private static void exportData(MinecraftServer s) {
+		if (!config.export) {
+			return;
+		}
+		Path dir = FabricLoader.getInstance().getGameDir().resolve("modpack-bridge").resolve("export");
+		try {
+			DataExport.run(s, dir, () -> {
+				JsonObject json = new JsonObject();
+				json.addProperty("type", "data_exported");
+				json.addProperty("dir", dir.toAbsolutePath().toString());
+				client.send(json);
+			});
+		} catch (RuntimeException e) {
+			LOG.error("data export failed", e);
+		}
 	}
 
 	/** Вызывается из миксина, когда игрок впервые получил достижение. */

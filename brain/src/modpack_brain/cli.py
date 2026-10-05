@@ -41,6 +41,10 @@ def main() -> None:
     sub.add_parser(
         "bridge", parents=[common, child], help="только мост: печатать события от мода (отладка без Telegram)"
     )
+    index = sub.add_parser("index", parents=[common], help="пересобрать индекс предметов и рецептов из выгрузки мода")
+    index.add_argument("--force", action="store_true", help="пересобрать, даже если выгрузка не менялась")
+    evaluate = sub.add_parser("eval", parents=[common], help="прогнать эталонные вопросы (eval/questions.toml)")
+    evaluate.add_argument("ids", nargs="*", help="только эти вопросы (по id)")
     ask = sub.add_parser("ask", parents=[common], help="задать вопрос ИИ из консоли")
     ask.add_argument("question", nargs="+")
     args = parser.parse_args()
@@ -67,6 +71,10 @@ def main() -> None:
     try:
         if args.command == "ask":
             asyncio.run(_ask(settings, " ".join(args.question)))
+        elif args.command == "eval":
+            asyncio.run(_eval(settings, args.ids))
+        elif args.command == "index":
+            _index(settings, force=args.force)
         elif args.command == "bridge":
             asyncio.run(_bridge_only(settings, exit_on_stdin_eof=args.exit_on_stdin_eof))
         else:
@@ -76,12 +84,48 @@ def main() -> None:
 
 
 def _assistant(settings: Settings) -> Assistant:
+    from .knowledge.index import DB_FILE
+    from .knowledge.query import Knowledge
+    from .knowledge.tools import build_server
+
     return Assistant(
         settings.server_dir,
         model=settings.llm_model,
         max_turns=settings.llm_max_turns,
         timeout=settings.llm_timeout_seconds,
+        mcp_server=build_server(Knowledge(settings.server_dir / DB_FILE)),
     )
+
+
+def _index(settings: Settings, *, force: bool) -> None:
+    from .knowledge.index import DB_FILE, EXPORT_DIR, ensure_index, rebuild
+
+    export = settings.server_dir / EXPORT_DIR
+    if not (export / "meta.json").exists():
+        sys.exit(f"Выгрузки нет: {export}. Запусти сервер с модом — он выгружает данные при старте.")
+    if force:
+        rebuild(settings.server_dir)
+    else:
+        ensure_index(settings.server_dir)
+    print(f"Индекс: {settings.server_dir / DB_FILE}")
+
+
+async def _reindex(settings: Settings) -> None:
+    """Пересобрать индекс в фоне, если выгрузка мода новее (при старте и по сигналу мода)."""
+    from .knowledge.index import ensure_index
+
+    try:
+        await asyncio.to_thread(ensure_index, settings.server_dir)
+    except Exception:
+        log.exception("индекс: не удалось пересобрать")
+
+
+async def _eval(settings: Settings, ids: list[str]) -> None:
+    from .eval import run_eval
+
+    await _reindex(settings)
+    report = await run_eval(_assistant(settings), ids or None)
+    print(f"Отчёт: {report}")
 
 
 async def _ask(settings: Settings, question: str) -> None:
@@ -117,7 +161,18 @@ async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -
         elif line:
             await bridge.send({"type": "chat", "from": "Console", "text": line})
 
-    bridge = Bridge(settings.bridge_host, settings.bridge_port, settings.resolve_bridge_token, on_event, on_ai_question)
+    async def on_data_exported(_message: dict[str, Any]) -> None:
+        await _reindex(settings)
+
+    bridge = Bridge(
+        settings.bridge_host,
+        settings.bridge_port,
+        settings.resolve_bridge_token,
+        on_event,
+        on_ai_question,
+        on_data_exported,
+    )
+    await _reindex(settings)
     game = GameAi(_assistant(settings), bridge.send, mirror, settings.questions_per_user_per_day)
     await bridge.start()
     loop = asyncio.get_running_loop()
@@ -179,7 +234,18 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     async def on_ai_question(message: dict[str, Any]) -> None:
         await game.handle(message)
 
-    bridge = Bridge(settings.bridge_host, settings.bridge_port, settings.resolve_bridge_token, on_event, on_ai_question)
+    async def on_data_exported(_message: dict[str, Any]) -> None:
+        await _reindex(settings)
+
+    bridge = Bridge(
+        settings.bridge_host,
+        settings.bridge_port,
+        settings.resolve_bridge_token,
+        on_event,
+        on_ai_question,
+        on_data_exported,
+    )
+    await _reindex(settings)
     game = GameAi(assistant, bridge.send, telegram.mirror_game_question, settings.questions_per_user_per_day)
     telegram.bridge = bridge
     if settings.resolve_bridge_token() is None:

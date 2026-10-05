@@ -20,6 +20,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     HookContext,
     HookMatcher,
+    McpSdkServerConfig,
     ResultMessage,
     ToolUseBlock,
     query,
@@ -45,12 +46,22 @@ DENIED_FILES = {
     "usernamecache.json",
 }
 DENIED_SUFFIXES = (".env",)
+# Выгрузка мода и индекс: огромные однострочные JSON и SQLite — агент работает с ними через инструменты pack.
+DENIED_DIRS = ("modpack-bridge/",)
 _DENIED_NAMES = {Path(name).name for name in DENIED_FILES}
+# Наши инструменты знаний (knowledge/tools.py) — только чтение индекса.
+MCP_PREFIX = "mcp__pack__"
 
 # Второй слой: правила Claude Code. В отличие от хука, они вырезают закрытые файлы и из результатов
 # широкого Grep/Glob (например, Grep по всей папке config/), а не только из прямых обращений.
 _DENY_SETTINGS = json.dumps(
-    {"permissions": {"deny": [f"Read(./{name})" for name in sorted(DENIED_FILES)] + ["Read(**/*.env)"]}}
+    {
+        "permissions": {
+            "deny": [f"Read(./{name})" for name in sorted(DENIED_FILES)]
+            + [f"Read(./{d}**)" for d in DENIED_DIRS]
+            + ["Read(**/*.env)"]
+        }
+    }
 )
 
 
@@ -79,8 +90,10 @@ class Assistant:
         max_turns: int,
         timeout: float,
         max_parallel: int = 2,
+        mcp_server: McpSdkServerConfig | None = None,
     ) -> None:
         self.server_dir = server_dir.resolve()
+        self.mcp_server = mcp_server
         self.model = model
         self.max_turns = max_turns
         self.timeout = timeout
@@ -107,6 +120,7 @@ class Assistant:
             # Изоляция от личных настроек Claude Code на этом ПК (режимы прав, хуки, CLAUDE.md, MCP).
             setting_sources=[],
             settings=_DENY_SETTINGS,
+            mcp_servers={"pack": self.mcp_server} if self.mcp_server else {},
             strict_mcp_config=True,
         )
         tools_used: list[str] = []
@@ -145,7 +159,7 @@ class Assistant:
 
 def check_tool_access(server_dir: Path, tool: str, tool_input: dict[str, Any]) -> str | None:
     """None, если вызов разрешён; иначе причина отказа (её увидит модель)."""
-    if tool in WEB_TOOLS:
+    if tool in WEB_TOOLS or tool.startswith(MCP_PREFIX):
         return None
     if tool not in ("Read", "Grep", "Glob"):
         return f"инструмент {tool} недоступен"
@@ -170,6 +184,8 @@ def check_tool_access(server_dir: Path, tool: str, tool_input: dict[str, Any]) -
         relative = resolved.relative_to(server_dir).as_posix()
         if relative in DENIED_FILES or relative.endswith(DENIED_SUFFIXES):
             return "этот файл закрыт"
+        if any((relative + "/").startswith(d) for d in DENIED_DIRS):
+            return "эта папка закрыта — для предметов и рецептов есть инструменты pack (find_item, item_recipes)"
     return None
 
 

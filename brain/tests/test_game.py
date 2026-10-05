@@ -49,3 +49,13 @@ async def test_daily_limit():
     await game.handle({"id": "a", "player": "P", "uuid": "u", "question": "1"})
     await game.handle({"id": "b", "player": "P", "uuid": "u", "question": "2"})
     assert "лимит" in sent[1]["text"]
+
+
+def test_eval_check():
+    from modpack_brain.eval import check
+
+    assert check("Нужен Iron Ingot", ["mcp__pack__item_recipes"], ["iron"], ["item_recipes"]) == []
+    assert check("ничего", [], ["iron"], ["item_recipes"]) == [
+        "в ответе нет ни одного из: iron",
+        "не вызван item_recipes",
+    ]
