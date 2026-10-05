@@ -50,7 +50,7 @@ public final class DataExport {
 		for (Recipe<?> recipe : server.getRecipeManager().getRecipes()) {
 			try {
 				recipes.add(recipe(server, recipe));
-			} catch (RuntimeException e) {
+			} catch (Exception | LinkageError e) {
 				failed++;
 			}
 		}
@@ -91,12 +91,8 @@ public final class DataExport {
 		for (Item item : BuiltInRegistries.ITEM) {
 			ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
 			JsonObject json = new JsonObject();
-			json.addProperty("key", item.getDescriptionId());
-			try {
-				json.addProperty("name", new ItemStack(item).getHoverName().getString());
-			} catch (RuntimeException e) {
-				json.addProperty("name", id.getPath());
-			}
+			json.addProperty("key", Safe.translationKey(item));
+			json.addProperty("name", Safe.name(item, id.getPath()));
 			out.add(id.toString(), json);
 		}
 		return out;
@@ -122,7 +118,7 @@ public final class DataExport {
 		ItemStack result = ItemStack.EMPTY;
 		try {
 			result = recipe.getResultItem(server.registryAccess());
-		} catch (RuntimeException ignored) {
+		} catch (Exception | LinkageError ignored) {
 			// у части модовых рецептов результат зависит от входа — оставляем пустым
 		}
 		if (result != null && !result.isEmpty()) {
@@ -132,7 +128,7 @@ public final class DataExport {
 		NonNullList<Ingredient> ingredients;
 		try {
 			ingredients = recipe.getIngredients();
-		} catch (RuntimeException e) {
+		} catch (Exception | LinkageError e) {
 			ingredients = NonNullList.create();
 		}
 		JsonArray inputs = new JsonArray();
@@ -163,11 +159,17 @@ public final class DataExport {
 				out.add("tag", json.getAsJsonObject().get("tag"));
 				return out;
 			}
-		} catch (RuntimeException ignored) {
+		} catch (Exception | LinkageError ignored) {
 			// нестандартный ингредиент — ниже развернём в список предметов
 		}
 		JsonArray items = new JsonArray();
-		for (ItemStack stack : ingredient.getItems()) {
+		ItemStack[] stacks;
+		try {
+			stacks = ingredient.getItems();
+		} catch (Exception | LinkageError e) {
+			stacks = new ItemStack[0];
+		}
+		for (ItemStack stack : stacks) {
 			String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
 			if (!items.contains(new JsonPrimitive(id))) {
 				items.add(id);

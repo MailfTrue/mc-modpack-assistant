@@ -127,7 +127,8 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 				json.addProperty("dir", dir.toAbsolutePath().toString());
 				client.send(json);
 			});
-		} catch (RuntimeException e) {
+		} catch (Exception | LinkageError e) {
+			// Выгрузка — вспомогательная функция: никогда не роняем из-за неё сервер.
 			LOG.error("data export failed", e);
 		}
 	}

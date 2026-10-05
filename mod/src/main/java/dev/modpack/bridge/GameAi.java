@@ -11,6 +11,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.locale.Language;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -67,7 +68,11 @@ public final class GameAi {
 		json.addProperty("player", name);
 		if (uuid != null) {
 			json.addProperty("uuid", uuid.toString());
-			json.add("context", context(player));
+			try {
+				json.add("context", context(player));
+			} catch (Exception | LinkageError e) {
+				// контекст — бонус; вопрос уйдёт и без него
+			}
 		}
 		json.addProperty("question", question);
 		client.send(json);
@@ -108,7 +113,7 @@ public final class GameAi {
 			BlockState state = player.level().getBlockState(blockHit.getBlockPos());
 			JsonObject block = new JsonObject();
 			block.addProperty("id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
-			block.addProperty("name", state.getBlock().getName().getString());
+			block.addProperty("name", Language.getInstance().getOrDefault(state.getBlock().getDescriptionId()));
 			ctx.add("looking_at_block", block);
 		}
 		ctx.addProperty("health", Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth()));
@@ -121,8 +126,10 @@ public final class GameAi {
 			return;
 		}
 		JsonObject item = new JsonObject();
-		item.addProperty("id", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
-		item.addProperty("name", stack.getHoverName().getString());
+		String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+		item.addProperty("id", id);
+		// Своё имя (с наковальни) getHoverName берёт из NBT, не вызывая код предмета; иначе — по языковому файлу.
+		item.addProperty("name", stack.hasCustomHoverName() ? stack.getHoverName().getString() : Safe.name(stack.getItem(), id));
 		item.addProperty("count", stack.getCount());
 		if (stack.getTag() != null) {
 			String nbt = stack.getTag().toString();

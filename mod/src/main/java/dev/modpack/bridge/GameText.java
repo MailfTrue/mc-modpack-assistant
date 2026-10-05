@@ -84,7 +84,9 @@ public final class GameText {
 			return Component.literal(id).withStyle(ChatFormatting.GRAY);
 		}
 		ItemStack stack = new ItemStack(item.get());
-		return Component.literal("[").append(stack.getHoverName()).append("]").withStyle(Style.EMPTY
+		// Ключ перевода, а не getHoverName(): название подставит клиент на своём языке, а код мода не вызывается.
+		Component name = Component.translatable(Safe.translationKey(item.get()));
+		return Component.literal("[").append(name).append("]").withStyle(Style.EMPTY
 				.withColor(ChatFormatting.AQUA)
 				.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM, new HoverEvent.ItemStackInfo(stack))));
 	}
