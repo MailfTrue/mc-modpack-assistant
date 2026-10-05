@@ -1,0 +1,9 @@
+{
+	"required": true,
+	"package": "dev.modpack.bridge.mixin",
+	"compatibilityLevel": "JAVA_17",
+	"server": ["PlayerAdvancementsMixin"],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
