@@ -1,11 +1,14 @@
-"""Точка входа: `modpack-brain run | ask`."""
+"""Точка входа: `modpack-brain run | ask | bridge`."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
+import os
 import sys
+import threading
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -24,12 +27,24 @@ SILENT_EVENTS = {"chat", "advancement", "death"}
 def main() -> None:
     parser = argparse.ArgumentParser(prog="modpack-brain", description="ИИ-помощник и мост Telegram ↔ Minecraft")
     parser.add_argument("-v", "--verbose", action="store_true", help="подробные логи")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--server-dir", type=Path, help="папка сервера (иначе SERVER_DIR из окружения или brain/.env)")
+    child = argparse.ArgumentParser(add_help=False)
+    child.add_argument(
+        "--exit-on-stdin-eof",
+        action="store_true",
+        help="завершиться, когда закроется stdin (так мод останавливает brain вместе с сервером)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("run", help="запустить Telegram-бота и мост с модом")
-    sub.add_parser("bridge", help="только мост: печатать события от мода в консоль (отладка без Telegram)")
-    ask = sub.add_parser("ask", help="задать вопрос ИИ из консоли")
+    sub.add_parser("run", parents=[common, child], help="запустить Telegram-бота и мост с модом")
+    sub.add_parser(
+        "bridge", parents=[common, child], help="только мост: печатать события от мода (отладка без Telegram)"
+    )
+    ask = sub.add_parser("ask", parents=[common], help="задать вопрос ИИ из консоли")
     ask.add_argument("question", nargs="+")
     args = parser.parse_args()
+    if args.server_dir is not None:
+        os.environ["SERVER_DIR"] = str(args.server_dir)
 
     # Windows-консоль по умолчанию не в UTF-8.
     for stream in (sys.stdout, sys.stderr):
@@ -46,15 +61,15 @@ def main() -> None:
     try:
         settings = Settings()  # type: ignore[call-arg]
     except ValidationError as error:
-        sys.exit(f"Ошибка настроек (brain/.env):\n{error}")
+        sys.exit(f"Ошибка настроек (config/modpack-bridge.json сервера или brain/.env):\n{error}")
 
     try:
         if args.command == "ask":
             asyncio.run(_ask(settings, " ".join(args.question)))
         elif args.command == "bridge":
-            asyncio.run(_bridge_only(settings))
+            asyncio.run(_bridge_only(settings, exit_on_stdin_eof=args.exit_on_stdin_eof))
         else:
-            asyncio.run(_run(settings))
+            asyncio.run(_run(settings, exit_on_stdin_eof=args.exit_on_stdin_eof))
     except KeyboardInterrupt:
         log.info("остановлено")
 
@@ -78,7 +93,7 @@ async def _ask(settings: Settings, question: str) -> None:
     )
 
 
-async def _bridge_only(settings: Settings) -> None:
+async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     from .bridge import Bridge
 
     async def on_event(event: dict[str, Any]) -> None:
@@ -86,17 +101,36 @@ async def _bridge_only(settings: Settings) -> None:
 
     bridge = Bridge(settings.bridge_host, settings.bridge_port, settings.resolve_bridge_token, on_event)
     await bridge.start()
-    await asyncio.Event().wait()
+    stop = _stdin_closed(asyncio.get_running_loop()) if exit_on_stdin_eof else asyncio.Event()
+    await stop.wait()
+    log.info("stdin закрыт — завершаюсь")
+    await bridge.stop()
 
 
-async def _run(settings: Settings) -> None:
+def _stdin_closed(loop: asyncio.AbstractEventLoop) -> asyncio.Event:
+    """Событие, которое срабатывает, когда родитель (сервер) закрыл наш stdin или умер."""
+    closed = asyncio.Event()
+
+    def wait() -> None:
+        try:
+            while sys.stdin.buffer.read(4096):
+                pass
+        except (OSError, ValueError):
+            pass
+        loop.call_soon_threadsafe(closed.set)
+
+    threading.Thread(target=wait, name="stdin-watch", daemon=True).start()
+    return closed
+
+
+async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     from aiogram import Dispatcher
 
     from .bridge import Bridge
     from .telegram.bot import TelegramBot
 
     if settings.telegram_bot_token is None:
-        sys.exit("Не задан TELEGRAM_BOT_TOKEN в brain/.env")
+        sys.exit("Не задан токен Telegram: telegram.token в config/modpack-bridge.json сервера")
 
     telegram = TelegramBot(
         settings.telegram_bot_token.get_secret_value(),
@@ -119,8 +153,17 @@ async def _run(settings: Settings) -> None:
     await telegram.setup()
     dispatcher = Dispatcher()
     dispatcher.include_router(telegram.router)
+    polling = asyncio.create_task(dispatcher.start_polling(telegram.bot, handle_signals=False))
+    waiters: set[asyncio.Future[Any]] = {polling}
+    if exit_on_stdin_eof:
+        waiters.add(asyncio.create_task(_stdin_closed(asyncio.get_running_loop()).wait()))
     try:
-        await dispatcher.start_polling(telegram.bot, handle_signals=False)
+        await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        if not polling.done():
+            log.info("сервер остановился — завершаюсь")
+            await asyncio.sleep(2)  # дать дойти последним уведомлениям («сервер останавливается»)
+            await dispatcher.stop_polling()
+        await polling
     finally:
         await bridge.stop()
         await telegram.bot.session.close()

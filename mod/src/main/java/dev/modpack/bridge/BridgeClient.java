@@ -46,8 +46,9 @@ public final class BridgeClient {
 		this.modVersion = modVersion;
 	}
 
-	public void start() {
-		executor.execute(this::connect);
+	/** delay — дать только что запущенному brain время подняться, чтобы не сыпать предупреждениями. */
+	public void start(Duration delay) {
+		executor.schedule(this::connect, delay.toMillis(), TimeUnit.MILLISECONDS);
 	}
 
 	/** Потокобезопасно, не блокирует. */

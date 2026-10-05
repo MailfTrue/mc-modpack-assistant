@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import fnmatch
+import json
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -45,6 +46,12 @@ DENIED_FILES = {
 }
 DENIED_SUFFIXES = (".env",)
 _DENIED_NAMES = {Path(name).name for name in DENIED_FILES}
+
+# Второй слой: правила Claude Code. В отличие от хука, они вырезают закрытые файлы и из результатов
+# широкого Grep/Glob (например, Grep по всей папке config/), а не только из прямых обращений.
+_DENY_SETTINGS = json.dumps(
+    {"permissions": {"deny": [f"Read(./{name})" for name in sorted(DENIED_FILES)] + ["Read(**/*.env)"]}}
+)
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,7 @@ class Assistant:
             resume=session_id,
             # Изоляция от личных настроек Claude Code на этом ПК (режимы прав, хуки, CLAUDE.md, MCP).
             setting_sources=[],
+            settings=_DENY_SETTINGS,
             strict_mcp_config=True,
         )
         tools_used: list[str] = []

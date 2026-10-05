@@ -22,6 +22,7 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 
 	private static BridgeClient client;
 	private static BridgeConfig config;
+	private static BrainProcess brain;
 
 	@Override
 	public void onInitializeServer() {
@@ -34,8 +35,13 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 		}
 		String version = FabricLoader.getInstance().getModContainer(MOD_ID)
 				.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("?");
+		// Папка сервера = родитель config/.
+		brain = BrainProcess.fromConfig(config.brain, FabricLoader.getInstance().getConfigDir().getParent());
+		if (brain != null) {
+			brain.start();
+		}
 		client = new BridgeClient(URI.create(config.url), config.token, version);
-		client.start();
+		client.start(brain != null ? Duration.ofSeconds(3) : Duration.ZERO);
 		registerEvents();
 		LOG.info("Modpack Bridge {} started, brain: {}", version, config.url);
 	}
@@ -53,7 +59,12 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 				client.send(event("server_stopping"));
 			}
 		});
-		ServerLifecycleEvents.SERVER_STOPPED.register(server -> client.shutdown(Duration.ofSeconds(3)));
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+			client.shutdown(Duration.ofSeconds(3));
+			if (brain != null) {
+				brain.stop();
+			}
+		});
 
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
 			if (events.joinLeave) {

@@ -566,6 +566,7 @@ dependencies = [
     { name = "aiogram" },
     { name = "claude-agent-sdk" },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "websockets" },
 ]
 
@@ -581,6 +582,7 @@ requires-dist = [
     { name = "aiogram", specifier = ">=3.31.0" },
     { name = "claude-agent-sdk", specifier = ">=0.2.163" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
+    { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "websockets", specifier = ">=17.2" },
 ]
 

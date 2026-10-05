@@ -8,18 +8,47 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 
 /**
- * config/modpack-bridge.json. При первом запуске создаётся с новым случайным токеном,
- * brain читает тот же файл, так что руками ничего копировать не нужно.
+ * config/modpack-bridge.json — единый конфиг и мода, и brain (brain читает тот же файл).
+ * При первом запуске создаётся с новым случайным токеном моста. Закрыт от чтения ИИ.
  */
 public final class BridgeConfig {
-	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().serializeNulls().create();
 
 	public String url = "ws://127.0.0.1:8765";
 	public String token = "";
+	public Brain brain = new Brain();
+	public Telegram telegram = new Telegram();
+	public Llm llm = new Llm();
 	public Events events = new Events();
+
+	/** brain запускается сервером как дочерний процесс и останавливается вместе с ним. */
+	public static final class Brain {
+		public boolean autostart = true;
+		/** Папка brain/ из репозитория. Пусто — автозапуск выключен. */
+		public String dir = "";
+		/** Команда запуска; к ней добавляются --server-dir и --exit-on-stdin-eof. */
+		public List<String> command = new ArrayList<>(List.of("uv", "run", "modpack-brain", "run"));
+	}
+
+	public static final class Telegram {
+		public String token = "";
+		public List<Long> allowedChatIds = new ArrayList<>();
+		/** Куда слать события сервера; null — первый из allowedChatIds. */
+		public Long eventsChatId;
+	}
+
+	public static final class Llm {
+		/** sonnet | opus | haiku или полный id модели. */
+		public String model = "sonnet";
+		public int maxTurns = 30;
+		public int timeoutSeconds = 240;
+		public int questionsPerUserPerDay = 50;
+	}
 
 	public static final class Events {
 		public boolean server = true;
@@ -40,6 +69,15 @@ public final class BridgeConfig {
 		}
 		if (config == null) {
 			config = new BridgeConfig();
+		}
+		if (config.brain == null) {
+			config.brain = new Brain();
+		}
+		if (config.telegram == null) {
+			config.telegram = new Telegram();
+		}
+		if (config.llm == null) {
+			config.llm = new Llm();
 		}
 		if (config.events == null) {
 			config.events = new Events();
