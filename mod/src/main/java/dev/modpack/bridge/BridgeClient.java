@@ -1,6 +1,7 @@
 package dev.modpack.bridge;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -19,6 +20,13 @@ import org.slf4j.LoggerFactory;
  * Пока brain недоступен, последние {@link #QUEUE_LIMIT} сообщений ждут в очереди, остальное отбрасывается.
  */
 public final class BridgeClient {
+	/** Колбэки вызываются в сетевом потоке — переносите работу в серверный поток сами. */
+	public interface Handler {
+		void onMessage(JsonObject message);
+
+		void onConnectionLost();
+	}
+
 	static final int QUEUE_LIMIT = 100;
 	private static final Logger LOG = LoggerFactory.getLogger("modpack_bridge");
 	private static final long MAX_BACKOFF_SECONDS = 30;
@@ -26,6 +34,7 @@ public final class BridgeClient {
 	private final URI uri;
 	private final String token;
 	private final String modVersion;
+	private final Handler handler;
 	private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 	private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
 		Thread thread = new Thread(r, "modpack-bridge");
@@ -39,11 +48,17 @@ public final class BridgeClient {
 	private boolean closed;
 	private long backoffSeconds = 1;
 	private boolean warnedOffline;
+	private volatile boolean connected;
 
-	public BridgeClient(URI uri, String token, String modVersion) {
+	public BridgeClient(URI uri, String token, String modVersion, Handler handler) {
 		this.uri = uri;
 		this.token = token;
 		this.modVersion = modVersion;
+		this.handler = handler;
+	}
+
+	public boolean isConnected() {
+		return connected;
 	}
 
 	/** delay — дать только что запущенному brain время подняться, чтобы не сыпать предупреждениями. */
@@ -104,6 +119,7 @@ public final class BridgeClient {
 					}
 					LOG.info("connected to brain {}", uri);
 					socket = ws;
+					connected = true;
 					backoffSeconds = 1;
 					warnedOffline = false;
 					JsonObject hello = new JsonObject();
@@ -133,7 +149,15 @@ public final class BridgeClient {
 			socket.abort();
 			socket = null;
 		}
+		lost();
 		scheduleReconnect();
+	}
+
+	private void lost() {
+		if (connected) {
+			connected = false;
+			handler.onConnectionLost();
+		}
 	}
 
 	private void scheduleReconnect() {
@@ -162,8 +186,12 @@ public final class BridgeClient {
 			if (last) {
 				String message = partial.toString();
 				partial.setLength(0);
-				// Команды от brain (мост чата, /online) появятся в M4.
 				LOG.debug("from brain: {}", message);
+				try {
+					handler.onMessage(JsonParser.parseString(message).getAsJsonObject());
+				} catch (RuntimeException e) {
+					LOG.warn("bad message from brain: {}", rootMessage(e));
+				}
 			}
 			ws.request(1);
 			return null;
@@ -175,6 +203,7 @@ public final class BridgeClient {
 				if (socket == ws) {
 					LOG.info("brain closed the connection ({} {})", statusCode, reason);
 					socket = null;
+					lost();
 					scheduleReconnect();
 				}
 			});
@@ -187,6 +216,7 @@ public final class BridgeClient {
 				if (socket == ws) {
 					LOG.warn("brain connection error: {}", rootMessage(error));
 					socket = null;
+					lost();
 					scheduleReconnect();
 				}
 			});

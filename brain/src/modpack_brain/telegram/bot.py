@@ -1,4 +1,4 @@
-"""Telegram-бот: вопросы к ИИ в группе и уведомления о событиях сервера."""
+"""Telegram-бот: вопросы к ИИ, события сервера и мост чата Telegram ↔ игра."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from aiogram.types import Message
 from aiogram.utils.chat_action import ChatActionSender
 
 from .. import prompts
+from ..bridge import Bridge, BridgeError
 from ..llm import Assistant, Image
 from .format import render
 
@@ -29,6 +30,8 @@ HELP = (
     "• упомянуть меня в сообщении\n"
     "• ответить (reply) на мой ответ — продолжу разговор с контекстом\n"
     "• можно приложить скриншот\n\n"
+    "Остальные сообщения группы пересылаются в игровой чат.\n"
+    "<code>/online</code> — кто сейчас на сервере\n"
     "<code>/chatid</code> — показать id этого чата."
 )
 
@@ -54,12 +57,14 @@ class TelegramBot:
         allowed_chat_ids: list[int],
         events_chat_id: int | None,
         questions_per_user_per_day: int,
+        bridge: Bridge | None = None,
     ) -> None:
         self.bot = Bot(token, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
         self.assistant = assistant
         self.allowed = set(allowed_chat_ids)
         self.events_chat_id = events_chat_id
         self.daily_limit = questions_per_user_per_day
+        self.bridge = bridge
         # (chat_id, id сообщения бота) → id сессии LLM, чтобы reply продолжал разговор.
         self._sessions = LRU(capacity=5000)
         self._busy: set[int] = set()
@@ -76,14 +81,23 @@ class TelegramBot:
         if not self.allowed:
             log.warning("telegram: ALLOWED_CHAT_IDS пуст — бот отвечает только на /chatid")
 
-    async def notify(self, text: str, *, silent: bool = False) -> None:
+    async def notify(self, text: str, *, silent: bool = False) -> Message | None:
         """Сообщение в чат событий сервера."""
         if self.events_chat_id is None:
-            return
+            return None
         try:
-            await self.bot.send_message(self.events_chat_id, text, disable_notification=silent)
+            return await self.bot.send_message(self.events_chat_id, text, disable_notification=silent)
         except Exception:
             log.exception("telegram: не удалось отправить событие")
+            return None
+
+    async def mirror_game_question(self, player: str, question: str, answer: str) -> None:
+        """Копия вопроса /ai из игры и ответа на него."""
+        posted = await self.notify(
+            f"🎮 <b>{html.escape(player)}</b> спросил в игре: <i>{html.escape(question)}</i>", silent=True
+        )
+        if posted is not None:
+            await self._send_answer(posted, answer, None, silent=True)
 
     # ---------- маршрутизация ----------
 
@@ -92,6 +106,7 @@ class TelegramBot:
         router.message.register(self._chat_id, Command("chatid"))
         router.message.register(self._help, Command("start", "help"), F.chat.id.func(self._is_allowed))
         router.message.register(self._ai_command, Command("ai"), F.chat.id.func(self._is_allowed))
+        router.message.register(self._online, Command("online"), F.chat.id.func(self._is_allowed))
         router.message.register(self._maybe_question, F.chat.id.func(self._is_allowed))
         return router
 
@@ -104,22 +119,34 @@ class TelegramBot:
     async def _help(self, message: Message) -> None:
         await message.reply(HELP)
 
+    async def _online(self, message: Message) -> None:
+        if self.bridge is None or not self.bridge.connected:
+            await message.reply("🔴 Сервер офлайн")
+            return
+        try:
+            result = await self.bridge.request("online")
+        except BridgeError as error:
+            await message.reply(f"Не удалось узнать: {html.escape(str(error))}")
+            return
+        players = [str(p) for p in result.get("players", [])]
+        header = f"🟢 Онлайн {len(players)}/{result.get('max', '?')}"
+        await message.reply(header + (": " + ", ".join(html.escape(p) for p in players) if players else ""))
+
     async def _ai_command(self, message: Message, command: CommandObject) -> None:
         await self._answer(message, (command.args or "").strip())
 
     async def _maybe_question(self, message: Message) -> None:
-        """Упоминание бота, reply на его сообщение или любое сообщение в личке."""
+        """Упоминание бота, reply на его ответ или личка — вопрос ИИ; остальное из группы — в игровой чат."""
         text = message.text or message.caption or ""
         mention = f"@{self._me_username}" if self._me_username else None
-        replied_to_me = (
-            message.reply_to_message is not None
-            and message.reply_to_message.from_user is not None
-            and message.reply_to_message.from_user.id == self._me_id
-        )
+        reply = message.reply_to_message
+        # Reply именно на ответ ИИ (а не на событие или пересланный из игры чат).
+        replied_to_answer = reply is not None and (message.chat.id, reply.message_id) in self._sessions
         is_private = message.chat.type == ChatType.PRIVATE
         mentioned = bool(mention) and mention.lower() in text.lower()
-        if not (mentioned or replied_to_me or is_private):
-            return  # обычная болтовня в группе — не наше дело (мост в игру появится в M4)
+        if not (mentioned or replied_to_answer or is_private):
+            await self._relay_to_game(message)
+            return
         if mention:
             text = re.sub(re.escape(mention), "", text, flags=re.IGNORECASE)
         await self._answer(message, text.strip())
@@ -163,14 +190,21 @@ class TelegramBot:
         finally:
             self._busy.discard(user.id)
 
-    async def _send_answer(self, message: Message, text: str, session_id: str | None) -> None:
+    async def _relay_to_game(self, message: Message) -> None:
+        if self.bridge is None or message.chat.id != self.events_chat_id or message.from_user is None:
+            return
+        if message.from_user.is_bot or (text := _relay_text(message)) is None:
+            return
+        await self.bridge.send({"type": "chat", "from": message.from_user.full_name, "text": text})
+
+    async def _send_answer(self, message: Message, text: str, session_id: str | None, *, silent: bool = False) -> None:
         target = message
         for chunk in render(text):
             try:
-                sent = await target.reply(chunk)
+                sent = await target.reply(chunk, disable_notification=silent)
             except TelegramBadRequest as error:
                 log.warning("telegram: HTML не принят (%s), шлю как текст", error)
-                sent = await target.reply(_strip_tags(chunk), parse_mode=None)
+                sent = await target.reply(_strip_tags(chunk), parse_mode=None, disable_notification=silent)
             if session_id:
                 self._sessions.put((sent.chat.id, sent.message_id), session_id)
             target = sent
@@ -185,6 +219,25 @@ class TelegramBot:
             return []
         data = await self.bot.download(file_id)
         return [Image(data.read(), media_type)] if data else []
+
+
+def _relay_text(message: Message) -> str | None:
+    """Текст для игрового чата; вложения — пометкой. None — пересылать нечего."""
+    text = (message.text or message.caption or "").strip()
+    if message.photo:
+        label = "[фото]"
+    elif message.sticker:
+        label = f"[стикер {message.sticker.emoji or ''}]".replace(" ]", "]")
+    elif message.voice or message.video_note:
+        label = "[голосовое]"
+    elif message.video or message.animation:
+        label = "[видео]"
+    elif message.document:
+        label = "[файл]"
+    else:
+        label = ""
+    combined = f"{label} {text}".strip()
+    return combined or None
 
 
 def _strip_tags(text: str) -> str:

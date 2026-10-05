@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import threading
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -94,27 +95,55 @@ async def _ask(settings: Settings, question: str) -> None:
 
 
 async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
-    from .bridge import Bridge
+    """Отладка без Telegram: события и ответы /ai — в консоль; строки из stdin — `/online` или текст в игровой чат."""
+    from .bridge import Bridge, BridgeError
+    from .game import GameAi
 
     async def on_event(event: dict[str, Any]) -> None:
         print(format_event(event) or event, flush=True)
 
-    bridge = Bridge(settings.bridge_host, settings.bridge_port, settings.resolve_bridge_token, on_event)
+    async def on_ai_question(message: dict[str, Any]) -> None:
+        await game.handle(message)
+
+    async def mirror(player: str, question: str, answer: str) -> None:
+        print(f"🎮 {player} спросил в игре: {question}\n{answer}", flush=True)
+
+    async def on_line(line: str) -> None:
+        if line == "/online":
+            try:
+                print(await bridge.request("online"), flush=True)
+            except BridgeError as error:
+                print(f"/online: {error}", flush=True)
+        elif line:
+            await bridge.send({"type": "chat", "from": "Console", "text": line})
+
+    bridge = Bridge(settings.bridge_host, settings.bridge_port, settings.resolve_bridge_token, on_event, on_ai_question)
+    game = GameAi(_assistant(settings), bridge.send, mirror, settings.questions_per_user_per_day)
     await bridge.start()
-    stop = _stdin_closed(asyncio.get_running_loop()) if exit_on_stdin_eof else asyncio.Event()
+    loop = asyncio.get_running_loop()
+    stop = _watch_stdin(loop, None if exit_on_stdin_eof else on_line)
     await stop.wait()
     log.info("stdin закрыт — завершаюсь")
     await bridge.stop()
 
 
-def _stdin_closed(loop: asyncio.AbstractEventLoop) -> asyncio.Event:
-    """Событие, которое срабатывает, когда родитель (сервер) закрыл наш stdin или умер."""
+def _watch_stdin(
+    loop: asyncio.AbstractEventLoop, on_line: Callable[[str], Awaitable[None]] | None = None
+) -> asyncio.Event:
+    """Событие, которое срабатывает, когда закрыт stdin (родитель-сервер остановился или умер).
+
+    on_line — вызывать для каждой строки (интерактивная отладка).
+    """
     closed = asyncio.Event()
 
     def wait() -> None:
         try:
-            while sys.stdin.buffer.read(4096):
-                pass
+            if on_line is None:
+                while sys.stdin.buffer.read(4096):
+                    pass
+            else:
+                for line in sys.stdin:
+                    asyncio.run_coroutine_threadsafe(on_line(line.strip()), loop)
         except (OSError, ValueError):
             pass
         loop.call_soon_threadsafe(closed.set)
@@ -127,14 +156,16 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     from aiogram import Dispatcher
 
     from .bridge import Bridge
+    from .game import GameAi
     from .telegram.bot import TelegramBot
 
     if settings.telegram_bot_token is None:
         sys.exit("Не задан токен Telegram: telegram.token в config/modpack-bridge.json сервера")
 
+    assistant = _assistant(settings)
     telegram = TelegramBot(
         settings.telegram_bot_token.get_secret_value(),
-        _assistant(settings),
+        assistant,
         allowed_chat_ids=settings.allowed_chat_ids,
         events_chat_id=settings.events_chat,
         questions_per_user_per_day=settings.questions_per_user_per_day,
@@ -145,7 +176,12 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
         if text := format_event(event):
             await telegram.notify(text, silent=event.get("event") in SILENT_EVENTS)
 
-    bridge = Bridge(settings.bridge_host, settings.bridge_port, settings.resolve_bridge_token, on_event)
+    async def on_ai_question(message: dict[str, Any]) -> None:
+        await game.handle(message)
+
+    bridge = Bridge(settings.bridge_host, settings.bridge_port, settings.resolve_bridge_token, on_event, on_ai_question)
+    game = GameAi(assistant, bridge.send, telegram.mirror_game_question, settings.questions_per_user_per_day)
+    telegram.bridge = bridge
     if settings.resolve_bridge_token() is None:
         log.warning("мост: токена пока нет — он появится после первого запуска сервера с модом")
     await bridge.start()
@@ -156,7 +192,7 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     polling = asyncio.create_task(dispatcher.start_polling(telegram.bot, handle_signals=False))
     waiters: set[asyncio.Future[Any]] = {polling}
     if exit_on_stdin_eof:
-        waiters.add(asyncio.create_task(_stdin_closed(asyncio.get_running_loop()).wait()))
+        waiters.add(asyncio.create_task(_watch_stdin(asyncio.get_running_loop()).wait()))
     try:
         await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
         if not polling.done():

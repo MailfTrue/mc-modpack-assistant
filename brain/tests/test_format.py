@@ -40,3 +40,7 @@ def test_render_fits_telegram():
 
 def test_long_line_split():
     assert all(len(c) <= 100 for c in split_markdown("a" * 450, limit=100))
+
+
+def test_item_markers_become_names():
+    assert to_telegram_html("Нужен [[minecraft:iron_ingot]] и [[#c:ingots/tin]]") == "Нужен Iron Ingot и Tin"

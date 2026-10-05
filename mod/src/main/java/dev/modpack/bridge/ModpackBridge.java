@@ -1,21 +1,27 @@
 package dev.modpack.bridge;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import net.fabricmc.api.DedicatedServerModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.advancements.DisplayInfo;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Серверный мост: события сервера → brain (→ Telegram). Клиентам ставить не нужно. */
+/**
+ * Серверный мост: события сервера → brain (→ Telegram), сообщения и ответы ИИ из brain → игровой чат.
+ * Клиентам ставить не нужно.
+ */
 public final class ModpackBridge implements DedicatedServerModInitializer {
 	public static final String MOD_ID = "modpack_bridge";
 	private static final Logger LOG = LoggerFactory.getLogger(MOD_ID);
@@ -23,6 +29,8 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 	private static BridgeClient client;
 	private static BridgeConfig config;
 	private static BrainProcess brain;
+	private static GameAi gameAi;
+	private static volatile MinecraftServer server;
 
 	@Override
 	public void onInitializeServer() {
@@ -40,8 +48,10 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 		if (brain != null) {
 			brain.start();
 		}
-		client = new BridgeClient(URI.create(config.url), config.token, version);
+		client = new BridgeClient(URI.create(config.url), config.token, version, new Inbound());
+		gameAi = new GameAi(client);
 		client.start(brain != null ? Duration.ofSeconds(3) : Duration.ZERO);
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> gameAi.register(dispatcher));
 		registerEvents();
 		LOG.info("Modpack Bridge {} started, brain: {}", version, config.url);
 	}
@@ -49,6 +59,10 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 	private static void registerEvents() {
 		BridgeConfig.Events events = config.events;
 
+		ServerLifecycleEvents.SERVER_STARTING.register(s -> {
+			server = s;
+			gameAi.setServer(s);
+		});
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			if (events.server) {
 				client.send(event("server_started"));
@@ -104,6 +118,60 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 		json.addProperty("description", display.getDescription().getString());
 		json.addProperty("frame", display.getFrame().getName());
 		client.send(json);
+	}
+
+	/** Сообщения от brain. Приходят в сетевом потоке — вся работа переносится в серверный. */
+	private static final class Inbound implements BridgeClient.Handler {
+		@Override
+		public void onMessage(JsonObject message) {
+			MinecraftServer s = server;
+			if (s == null) {
+				return;
+			}
+			s.execute(() -> handle(s, message));
+		}
+
+		@Override
+		public void onConnectionLost() {
+			MinecraftServer s = server;
+			if (s != null) {
+				s.execute(gameAi::onConnectionLost);
+			}
+		}
+
+		private void handle(MinecraftServer s, JsonObject message) {
+			String type = message.has("type") ? message.get("type").getAsString() : "";
+			switch (type) {
+				case "chat" -> {
+					String from = message.has("from") ? message.get("from").getAsString() : "?";
+					String text = message.has("text") ? message.get("text").getAsString() : "";
+					if (!text.isBlank()) {
+						s.getPlayerList().broadcastSystemMessage(GameText.telegram(from, text), false);
+					}
+				}
+				case "ai_answer" -> gameAi.onAnswer(message);
+				case "request" -> client.send(response(s, message));
+				default -> LOG.debug("unknown message from brain: {}", type);
+			}
+		}
+
+		private JsonObject response(MinecraftServer s, JsonObject request) {
+			JsonObject response = new JsonObject();
+			response.addProperty("type", "response");
+			response.add("id", request.get("id"));
+			String method = request.has("method") ? request.get("method").getAsString() : "";
+			if (method.equals("online")) {
+				JsonArray players = new JsonArray();
+				s.getPlayerList().getPlayers().forEach(p -> players.add(p.getGameProfile().getName()));
+				JsonObject result = new JsonObject();
+				result.add("players", players);
+				result.addProperty("max", s.getPlayerList().getMaxPlayers());
+				response.add("result", result);
+			} else {
+				response.addProperty("error", "unknown method: " + method);
+			}
+			return response;
+		}
 	}
 
 	private static JsonObject event(String name) {

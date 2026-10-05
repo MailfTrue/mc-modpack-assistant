@@ -10,6 +10,7 @@ TELEGRAM_LIMIT = 4096
 CHUNK_SOURCE_LIMIT = 3500
 
 _FENCE = re.compile(r"^```")
+_ITEM = re.compile(r"\[\[#?([a-z0-9_.-]+):([a-z0-9_./-]+)\]\]")
 _CODE_BLOCK = re.compile(r"```[^\n`]*\n?(.*?)```", re.DOTALL)
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
@@ -30,6 +31,8 @@ def to_telegram_html(markdown: str) -> str:
         blocks.append(f"<pre>{html.escape(match.group(1).rstrip(), quote=False)}</pre>")
         return f"\x00B{len(blocks) - 1}\x00"
 
+    # Маркеры предметов для игры ([[minecraft:iron_ingot]]) → «Iron Ingot».
+    markdown = _ITEM.sub(lambda m: m.group(2).rsplit("/", 1)[-1].replace("_", " ").title(), markdown)
     text = _CODE_BLOCK.sub(stash_block, markdown.strip())
     out: list[str] = []
     quote: list[str] = []
