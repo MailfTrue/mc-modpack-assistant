@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 
 QUESTS_DIR = Path("config") / "ftbquests" / "quests"
 PROGRESS_DIR = Path("world") / "ftbquests"
+# Английские оригиналы квестов, если на сервер положен перевод (русская локализация сборки).
+ORIGINAL_DIR = Path("modpack-bridge") / "quests-original" / "quests"
 MAX_DESCRIPTION = 1500
 
 _FORMAT = re.compile(r"&[0-9a-fk-or]", re.IGNORECASE)
@@ -35,6 +37,10 @@ class Quest:
     dependencies: list[str]
     min_dependencies: int = 0
     task_ids: list[str] = field(default_factory=list)
+    # Английский оригинал (если квесты на сервере переведены): для поиска на обоих языках.
+    title_en: str = ""
+    chapter_en: str = ""
+    description_en: str = ""
 
 
 def clean(text: str) -> str:
@@ -42,7 +48,20 @@ def clean(text: str) -> str:
 
 
 def load_quests(server_dir: Path) -> list[Quest]:
-    base = server_dir / QUESTS_DIR
+    """Квесты сервера; если рядом лежат английские оригиналы (ORIGINAL_DIR), добавляет их к каждому квесту."""
+    quests = _load_from(server_dir / QUESTS_DIR)
+    original_dir = server_dir / ORIGINAL_DIR
+    if original_dir.is_dir():
+        originals = {q.id: q for q in _load_from(original_dir)}
+        for quest in quests:
+            if (original := originals.get(quest.id)) is not None:
+                quest.title_en = original.title
+                quest.chapter_en = original.chapter
+                quest.description_en = original.description
+    return quests
+
+
+def _load_from(base: Path) -> list[Quest]:
     groups: dict[str, str] = {}
     groups_file = base / "chapter_groups.snbt"
     if groups_file.exists():
@@ -225,4 +244,7 @@ def to_row(quest: Quest) -> tuple[Any, ...]:
         "\n".join(quest.rewards),
         json.dumps(quest.dependencies),
         quest.min_dependencies,
+        quest.title_en,
+        quest.chapter_en,
+        quest.description_en,
     )

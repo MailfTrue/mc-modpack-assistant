@@ -91,3 +91,18 @@ def test_available_respects_min_dependencies():
 
     quests = [quest("A", []), quest("B", []), quest("C", ["A", "B"]), quest("D", ["A", "B"], need=1)]
     assert [q.id for q in available(quests, {"A": 1})] == ["B", "D"]
+
+
+def test_english_originals_attached(server: Path):
+    original = server / "modpack-bridge/quests-original/quests/chapters"
+    original.mkdir(parents=True)
+    (original / "main.snbt").write_text(
+        '{id: "C1", title: "Main Story", quests: [{id: "Q1", title: "Start", tasks: []}]}', "utf-8"
+    )
+    chapter = server / "config/ftbquests/quests/chapters/main.snbt"
+    chapter.write_text(chapter.read_text("utf-8").replace('title: "Start"', 'title: "Начало"'), "utf-8")
+    quests = {q.id: q for q in load_quests(server)}
+    assert quests["Q1"].title == "Начало"
+    assert quests["Q1"].title_en == "Start"
+    assert quests["Q1"].chapter_en == "Main Story"
+    assert quests["Q2"].title_en == ""

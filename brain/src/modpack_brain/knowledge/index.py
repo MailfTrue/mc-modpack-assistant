@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 EXPORT_DIR = Path("modpack-bridge") / "export"
 DB_FILE = Path("modpack-bridge") / "knowledge.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -44,10 +44,12 @@ CREATE INDEX tags_item ON tags(item);
 CREATE TABLE mods (id TEXT PRIMARY KEY, name TEXT, version TEXT);
 CREATE TABLE quests (
     id TEXT PRIMARY KEY, chapter_id TEXT, chapter TEXT, grp TEXT, title TEXT, subtitle TEXT, description TEXT,
-    tasks TEXT, rewards TEXT, dependencies TEXT, min_dependencies INTEGER
+    tasks TEXT, rewards TEXT, dependencies TEXT, min_dependencies INTEGER,
+    title_en TEXT, chapter_en TEXT, description_en TEXT
 );
 CREATE VIRTUAL TABLE quests_fts USING fts5(
-    title, chapter, subtitle, description, tasks, rewards, content='quests',
+    title, chapter, subtitle, description, tasks, rewards, title_en, chapter_en, description_en,
+    content='quests',
     tokenize="unicode61 remove_diacritics 2 tokenchars '_:'"
 );
 """
@@ -170,7 +172,7 @@ def _fill(db: sqlite3.Connection, data: dict[str, Any]) -> None:
     db.executemany("INSERT OR REPLACE INTO recipes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", recipes)
     db.executemany("INSERT INTO recipe_inputs VALUES (?, ?)", inputs)
     db.executemany(
-        "INSERT OR REPLACE INTO quests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", map(to_row, data["quests"])
+        "INSERT OR REPLACE INTO quests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", map(to_row, data["quests"])
     )
     db.execute("INSERT INTO quests_fts(quests_fts) VALUES ('rebuild')")
     db.executemany(

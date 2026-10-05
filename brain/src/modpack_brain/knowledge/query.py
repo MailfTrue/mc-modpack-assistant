@@ -135,11 +135,12 @@ class Knowledge:
         with self._db() as db:
             rows = db.execute(
                 "SELECT quests.* FROM quests_fts JOIN quests ON quests.rowid = quests_fts.rowid "
-                "WHERE quests_fts MATCH ? ORDER BY bm25(quests_fts, 8.0, 2.0, 1.0, 1.0, 3.0, 1.0) LIMIT ?",
+                "WHERE quests_fts MATCH ? "
+                "ORDER BY bm25(quests_fts, 8.0, 2.0, 1.0, 1.0, 3.0, 1.0, 8.0, 2.0, 1.0) LIMIT ?",
                 (_fts_query(query), max(1, min(limit, 10))),
             ).fetchall()
             if not rows:
-                return f"Квестов по запросу «{query}» не найдено. Попробуй английские слова (квесты на английском)."
+                return f"Квестов по запросу «{query}» не найдено. Попробуй другие слова — по-русски или по-английски."
             return "\n\n".join(self._format_quest(db, row, full=i < 3) for i, row in enumerate(rows))
 
     def team_progress(self, player: str = "") -> str:
@@ -212,7 +213,10 @@ class Knowledge:
     def _format_quest(self, db: sqlite3.Connection, row: sqlite3.Row, *, full: bool) -> str:
         names = {i: self._name(db, i) for i in _ID_IN_TEXT.findall(f"{row['title']} {row['tasks']} {row['rewards']}")}
         row = {**dict(row), **{k: self._pretty(names, row[k] or "") for k in ("title", "tasks", "rewards")}}
-        lines = [f"Квест «{row['title']}» — глава {row['chapter']}" + (f" ({row['grp']})" if row["grp"] else "")]
+        original = f" (англ. «{row['title_en']}»)" if row["title_en"] and row["title_en"] != row["title"] else ""
+        lines = [
+            f"Квест «{row['title']}»{original} — глава {row['chapter']}" + (f" ({row['grp']})" if row["grp"] else "")
+        ]
         if row["subtitle"]:
             lines.append(f"  {row['subtitle']}")
         if row["tasks"]:
