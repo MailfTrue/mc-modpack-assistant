@@ -22,6 +22,7 @@ TOOL_NAMES = [
         "search_quests",
         "team_progress",
         "player_inventory",
+        "me_storage",
     )
 ]
 
@@ -98,7 +99,8 @@ def build_server(knowledge: Knowledge, live: LiveServer | None = None) -> McpSdk
 
     @tool(
         "player_inventory",
-        "Текущий инвентарь игрока онлайн (прямо с сервера): броня, руки, хотбар, инвентарь, эндер-сундук, "
+        "Текущий инвентарь игрока онлайн (прямо с сервера): броня, аксессуары (кольца, амулеты и др.), руки, "
+        "хотбар, инвентарь, эндер-сундук, рюкзак на спине и содержимое рюкзаков/шалкеров, "
         "чары и прочность. Для вопросов «что у меня есть», «что улучшить», «хватит ли ресурсов на крафт».",
         {"player": Annotated[str, "ник игрока в Minecraft"]},
     )
@@ -109,5 +111,26 @@ def build_server(knowledge: Knowledge, live: LiveServer | None = None) -> McpSdk
             text = await live.inventory(str(args.get("player", "")))
         return {"content": [{"type": "text", "text": text}]}
 
-    tools = [find_item, item_recipes, tag_items, list_mods, search_quests, team_progress, player_inventory]
+    @tool(
+        "me_storage",
+        "Содержимое ME-сети Applied Energistics 2 (только чтение): сколько чего лежит и что умеет автокрафт. "
+        "Сеть находится по привязанному беспроводному терминалу в инвентаре игрока или по ME-блоку, на который "
+        "он смотрел, задавая вопрос /ai. query — фильтр по названию (рус./англ.) или id; пусто — крупнейшие запасы.",
+        {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string", "description": "ник игрока в Minecraft"},
+                "query": {"type": "string", "description": "что искать, например 'железо' или 'ae2:certus_quartz'"},
+            },
+            "required": ["player"],
+        },
+    )
+    async def me_storage(args: dict[str, Any]) -> dict[str, Any]:
+        if live is None:
+            text = "ME-сеть недоступна в этом режиме."
+        else:
+            text = await live.me_storage(str(args.get("player", "")), str(args.get("query", "")))
+        return {"content": [{"type": "text", "text": text}]}
+
+    tools = [find_item, item_recipes, tag_items, list_mods, search_quests, team_progress, player_inventory, me_storage]
     return create_sdk_mcp_server(SERVER_NAME, tools=tools)

@@ -180,6 +180,13 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 			}
 		}
 
+		private ServerPlayer findPlayer(MinecraftServer s, JsonObject request) {
+			String name = request.has("player") ? request.get("player").getAsString() : "";
+			return s.getPlayerList().getPlayers().stream()
+					.filter(p -> p.getGameProfile().getName().equalsIgnoreCase(name))
+					.findFirst().orElse(null);
+		}
+
 		private JsonObject response(MinecraftServer s, JsonObject request) {
 			JsonObject response = new JsonObject();
 			response.addProperty("type", "response");
@@ -192,6 +199,19 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 				result.add("players", players);
 				result.addProperty("max", s.getPlayerList().getMaxPlayers());
 				response.add("result", result);
+			} else if (method.equals("me_storage")) {
+				ServerPlayer player = findPlayer(s, request);
+				if (!FabricLoader.getInstance().isModLoaded("ae2")) {
+					response.addProperty("error", "Applied Energistics 2 не установлен");
+				} else if (player == null) {
+					response.addProperty("error", "игрок не в сети");
+				} else {
+					try {
+						response.add("result", Ae2Access.storage(player, gameAi.recentMeBlock(player.getUUID())));
+					} catch (Exception | LinkageError e) {
+						response.addProperty("error", "не удалось прочитать ME-сеть: " + e);
+					}
+				}
 			} else if (method.equals("inventory")) {
 				String name = request.has("player") ? request.get("player").getAsString() : "";
 				ServerPlayer player = s.getPlayerList().getPlayers().stream()

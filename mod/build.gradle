@@ -5,6 +5,15 @@ plugins {
 version = project.mod_version
 group = project.maven_group
 
+repositories {
+	// API Applied Energistics 2 — только для компиляции; на сервере берётся установленный мод.
+	maven {
+		name = 'ModMaven'
+		url = 'https://modmaven.dev/'
+		content { includeGroup 'appeng' }
+	}
+}
+
 base {
 	archivesName = project.archives_base_name
 }
@@ -14,6 +23,7 @@ dependencies {
 	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	modCompileOnly("appeng:appliedenergistics2-fabric:${project.ae2_version}") { transitive = false }
 
 	testImplementation "org.junit.jupiter:junit-jupiter:5.12.2"
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"

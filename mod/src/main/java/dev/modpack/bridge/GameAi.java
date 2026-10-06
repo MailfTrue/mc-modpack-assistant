@@ -7,9 +7,11 @@ import com.mojang.brigadier.context.CommandContext;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.locale.Language;
 import net.minecraft.server.MinecraftServer;
@@ -28,6 +30,12 @@ public final class GameAi {
 	private MinecraftServer server;
 	/** id вопроса → UUID игрока (null — консоль). Только серверный поток. */
 	private final Map<String, UUID> pending = new HashMap<>();
+	/** Последний ME-блок, на который игрок смотрел при /ai: так ИИ находит «эту» ME-сеть. Только серверный поток. */
+	private final Map<UUID, SeenBlock> meBlocks = new HashMap<>();
+	private static final long ME_BLOCK_TTL_MS = 15 * 60 * 1000;
+
+	private record SeenBlock(GlobalPos pos, long at) {
+	}
 
 	public GameAi(BridgeClient client) {
 		this.client = client;
@@ -61,6 +69,9 @@ public final class GameAi {
 		String name = player != null ? player.getGameProfile().getName() : "Console";
 		String id = UUID.randomUUID().toString();
 		pending.put(id, uuid);
+		if (player != null) {
+			rememberMeBlock(player);
+		}
 
 		JsonObject json = new JsonObject();
 		json.addProperty("type", "ai_question");
@@ -79,6 +90,28 @@ public final class GameAi {
 
 		source.getServer().getPlayerList().broadcastSystemMessage(GameText.question(name, question), false);
 		return 1;
+	}
+
+	/** ME-блок, на который игрок недавно смотрел при /ai (или null). Серверный поток. */
+	public GlobalPos recentMeBlock(UUID player) {
+		SeenBlock seen = meBlocks.get(player);
+		return seen != null && System.currentTimeMillis() - seen.at() < ME_BLOCK_TTL_MS ? seen.pos() : null;
+	}
+
+	private void rememberMeBlock(ServerPlayer player) {
+		if (!FabricLoader.getInstance().isModLoaded("ae2")) {
+			return;
+		}
+		try {
+			HitResult hit = player.pick(6.0, 0.0f, false);
+			if (hit instanceof BlockHitResult blockHit && hit.getType() == HitResult.Type.BLOCK
+					&& Ae2Access.isGridBlock(player.serverLevel(), blockHit.getBlockPos())) {
+				GlobalPos pos = GlobalPos.of(player.level().dimension(), blockHit.getBlockPos());
+				meBlocks.put(player.getUUID(), new SeenBlock(pos, System.currentTimeMillis()));
+			}
+		} catch (Exception | LinkageError ignored) {
+			// без запоминания блока — ИИ попробует беспроводной терминал
+		}
 	}
 
 	/** Ответ от brain (вызывается в серверном потоке). */

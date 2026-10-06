@@ -144,7 +144,10 @@ async def _ask(settings: Settings, question: str) -> None:
 
 
 async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
-    """Отладка без Telegram: события и ответы /ai — в консоль; строки из stdin — `/online` или текст в игровой чат."""
+    """Отладка без Telegram: события и ответы /ai — в консоль.
+
+    Ввод: /online, /inv <ник>, /me <ник> [запрос] или текст в игровой чат.
+    """
     from .bridge import Bridge, BridgeError
     from .game import GameAi
 
@@ -158,7 +161,13 @@ async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -
         print(f"🎮 {player} спросил в игре: {question}\n{answer}", flush=True)
 
     async def on_line(line: str) -> None:
-        if line == "/online":
+        command, _, rest = line.partition(" ")
+        if command == "/inv":
+            print(await live.inventory(rest), flush=True)
+        elif command == "/me":
+            player, _, query = rest.partition(" ")
+            print(await live.me_storage(player, query), flush=True)
+        elif line == "/online":
             try:
                 print(await bridge.request("online"), flush=True)
             except BridgeError as error:
