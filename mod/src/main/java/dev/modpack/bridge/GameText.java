@@ -17,6 +17,10 @@ import net.minecraft.world.item.Items;
 /** Сообщения мода в игровом чате. */
 public final class GameText {
 	private static final int MAX_TG_TEXT = 256;
+	/** Ответ длиннее этого — в чате превью и кнопка «открыть ответ» (книга). */
+	static final int LONG_CHARS = 450;
+	static final int LONG_LINES = 8;
+	static final int PREVIEW_CHARS = 280;
 
 	private GameText() {
 	}
@@ -37,8 +41,16 @@ public final class GameText {
 
 	public static Component answer(String markdown, String id) {
 		MutableComponent out = aiPrefix();
-		for (Span span : ChatMarkup.parse(markdown)) {
+		boolean isLong = isLong(markdown);
+		for (Span span : ChatMarkup.parse(isLong ? preview(markdown) : markdown)) {
 			out.append(span(span));
+		}
+		if (isLong && id != null && !id.isEmpty()) {
+			out.append(Component.literal("\n[📖 открыть ответ]").withStyle(Style.EMPTY
+					.withColor(ChatFormatting.GOLD)
+					.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/ai book " + id))
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+							Component.literal("Полный ответ в виде книги")))));
 		}
 		if (id != null && !id.isEmpty()) {
 			// Аналог reply: подставляет в чат команду, продолжающую именно этот разговор.
@@ -47,6 +59,36 @@ public final class GameText {
 					.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/ai re " + id + " "))
 					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
 							Component.literal("Продолжить этот разговор: допиши вопрос и отправь")))));
+		}
+		return out;
+	}
+
+	/** Длинный ответ: в чате — превью и кнопка книги. */
+	static boolean isLong(String markdown) {
+		return markdown.length() > LONG_CHARS || markdown.strip().split("\n").length > LONG_LINES;
+	}
+
+	/** Начало ответа для чата: целые абзацы/строки, пока влезают в PREVIEW_CHARS. */
+	static String preview(String markdown) {
+		StringBuilder out = new StringBuilder();
+		for (String line : markdown.strip().split("\n")) {
+			if (out.length() > 0 && out.length() + line.length() > PREVIEW_CHARS) {
+				break;
+			}
+			out.append(line).append('\n');
+			if (out.length() >= PREVIEW_CHARS) {
+				break;
+			}
+		}
+		String text = out.toString().strip();
+		return text.length() > PREVIEW_CHARS ? text.substring(0, PREVIEW_CHARS) + "…" : text + "\n…";
+	}
+
+	/** Страница книги: тот же markdown, без префикса [ИИ]. */
+	public static MutableComponent page(String markdown) {
+		MutableComponent out = Component.empty();
+		for (Span span : ChatMarkup.parse(markdown)) {
+			out.append(span(span));
 		}
 		return out;
 	}

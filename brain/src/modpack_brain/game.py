@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 15 * 60
 # Сколько ответов помнить для кнопки «уточнить» (/ai re <id>) и reply из Telegram.
 MAX_ANSWERS = 2000
-# Длиннее — обрезаем в игре (чат маленький); копия в Telegram остаётся полной.
-GAME_MAX_CHARS = 1200
+# Длинные ответы мод показывает книгой (до ~100 страниц); сверх этого обрезаем — полный текст в Telegram.
+GAME_MAX_CHARS = 12000
 
 Send = Callable[[dict[str, Any]], Awaitable[bool]]
 # (игрок, вопрос, ответ, id сессии LLM) — копия в Telegram, reply на неё продолжит этот разговор.

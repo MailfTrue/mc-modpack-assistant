@@ -4,7 +4,9 @@ import com.google.gson.JsonObject;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import net.fabricmc.loader.api.FabricLoader;
@@ -30,6 +32,15 @@ public final class GameAi {
 	private MinecraftServer server;
 	/** id вопроса → UUID игрока (null — консоль). Только серверный поток. */
 	private final Map<String, UUID> pending = new HashMap<>();
+	/** Вопросы в ожидании ответа и последние ответы — для книги «открыть ответ». Серверный поток. */
+	private final Map<String, String> questions = new HashMap<>();
+	private final Map<String, String[]> answers = new LinkedHashMap<>(16, 0.75f, false) {
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<String, String[]> eldest) {
+			return size() > MAX_STORED_ANSWERS;
+		}
+	};
+	private static final int MAX_STORED_ANSWERS = 200;
 	/** Последний ME-блок, на который игрок смотрел при /ai: так ИИ находит «эту» ME-сеть. Только серверный поток. */
 	private final Map<UUID, SeenBlock> meBlocks = new HashMap<>();
 	private static final long ME_BLOCK_TTL_MS = 15 * 60 * 1000;
@@ -48,6 +59,8 @@ public final class GameAi {
 	public void register(CommandDispatcher<CommandSourceStack> dispatcher) {
 		// /ai re <id> <вопрос> — продолжить конкретный разговор (подставляется кнопкой «уточнить» под ответом).
 		dispatcher.register(Commands.literal("ai")
+				.then(Commands.literal("book").then(Commands.argument("id", StringArgumentType.word())
+						.executes(this::openBook)))
 				.then(Commands.literal("re").then(Commands.argument("id", StringArgumentType.word())
 						.then(Commands.argument("question", StringArgumentType.greedyString())
 								.executes(ctx -> ask(ctx, StringArgumentType.getString(ctx, "id"))))))
@@ -74,6 +87,7 @@ public final class GameAi {
 		// Короткий id: он попадает в команду /ai re <id> из кнопки «уточнить».
 		String id = UUID.randomUUID().toString().substring(0, 8);
 		pending.put(id, uuid);
+		questions.put(id, question);
 		if (player != null) {
 			rememberMeBlock(player);
 		}
@@ -97,6 +111,17 @@ public final class GameAi {
 		client.send(json);
 
 		source.getServer().getPlayerList().broadcastSystemMessage(GameText.question(name, question), false);
+		return 1;
+	}
+
+	private int openBook(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+		ServerPlayer player = ctx.getSource().getPlayerOrException();
+		String[] entry = answers.get(StringArgumentType.getString(ctx, "id"));
+		if (entry == null) {
+			ctx.getSource().sendFailure(BookView.expired());
+			return 0;
+		}
+		BookView.open(player, entry[0], entry[1]);
 		return 1;
 	}
 
@@ -126,9 +151,11 @@ public final class GameAi {
 	public void onAnswer(JsonObject message) {
 		String id = message.has("id") ? message.get("id").getAsString() : "";
 		if (pending.remove(id) == null && !id.isEmpty()) {
+			questions.remove(id);
 			return; // устаревший ответ (например, после переподключения)
 		}
 		String text = message.has("text") ? message.get("text").getAsString() : "";
+		answers.put(id, new String[] {questions.remove(id), text});
 		server.getPlayerList().broadcastSystemMessage(GameText.answer(text, id), false);
 	}
 
@@ -138,6 +165,7 @@ public final class GameAi {
 			return;
 		}
 		pending.clear();
+		questions.clear();
 		server.getPlayerList().broadcastSystemMessage(GameText.aiNotice("Связь с ИИ пропала, спроси ещё раз чуть позже."), false);
 	}
 
