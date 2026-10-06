@@ -35,10 +35,18 @@ public final class GameText {
 		return aiPrefix().append(Component.literal(text).withStyle(ChatFormatting.GRAY));
 	}
 
-	public static Component answer(String markdown) {
+	public static Component answer(String markdown, String id) {
 		MutableComponent out = aiPrefix();
 		for (Span span : ChatMarkup.parse(markdown)) {
 			out.append(span(span));
+		}
+		if (id != null && !id.isEmpty()) {
+			// Аналог reply: подставляет в чат команду, продолжающую именно этот разговор.
+			out.append(Component.literal("  [↩ уточнить]").withStyle(Style.EMPTY
+					.withColor(ChatFormatting.DARK_AQUA)
+					.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/ai re " + id + " "))
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+							Component.literal("Продолжить этот разговор: допиши вопрос и отправь")))));
 		}
 		return out;
 	}

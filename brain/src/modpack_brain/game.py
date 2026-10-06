@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import date
 from typing import Any
@@ -16,9 +17,12 @@ log = logging.getLogger(__name__)
 
 # Повторный /ai в течение этого времени продолжает разговор игрока.
 SESSION_TTL_SECONDS = 15 * 60
+# Сколько ответов помнить для кнопки «уточнить» (/ai re <id>) и reply из Telegram.
+MAX_ANSWERS = 2000
 
 Send = Callable[[dict[str, Any]], Awaitable[bool]]
-Mirror = Callable[[str, str, str], Awaitable[None]]
+# (игрок, вопрос, ответ, id сессии LLM) — копия в Telegram, reply на неё продолжит этот разговор.
+Mirror = Callable[[str, str, str, str | None], Awaitable[None]]
 
 
 def build_prompt(player: str, question: str, context: dict[str, Any] | None) -> str:
@@ -36,6 +40,8 @@ class GameAi:
         self.daily_limit = daily_limit
         self._sessions: dict[str, tuple[str, float]] = {}
         self._usage: dict[tuple[str, date], int] = {}
+        # id вопроса (он же id ответа в игре) → сессия LLM.
+        self._answers: OrderedDict[str, str] = OrderedDict()
 
     async def handle(self, message: dict[str, Any]) -> None:
         question_id = message.get("id")
@@ -52,7 +58,12 @@ class GameAi:
         self._usage[usage_key] = self._usage.get(usage_key, 0) + 1
 
         session_id = None
-        if (saved := self._sessions.get(key)) and time.monotonic() - saved[1] < SESSION_TTL_SECONDS:
+        if continue_id := message.get("continue"):
+            session_id = self._answers.get(str(continue_id))
+            if session_id is None:
+                await self._reply(question_id, "Этот разговор я уже не помню — спроси заново через /ai.")
+                return
+        elif (saved := self._sessions.get(key)) and time.monotonic() - saved[1] < SESSION_TTL_SECONDS:
             session_id = saved[0]
         log.info("игра: вопрос от %s: %r", player, question[:200])
         answer = await self.assistant.ask(
@@ -62,9 +73,13 @@ class GameAi:
         )
         if answer.session_id:
             self._sessions[key] = (answer.session_id, time.monotonic())
+            if question_id is not None:
+                self._answers[str(question_id)] = answer.session_id
+                while len(self._answers) > MAX_ANSWERS:
+                    self._answers.popitem(last=False)
         await self._reply(question_id, answer.text)
         if self.mirror is not None:
-            await self.mirror(player, question, answer.text)
+            await self.mirror(player, question, answer.text, answer.session_id)
 
     async def _reply(self, question_id: Any, text: str) -> None:
         if not await self.send({"type": "ai_answer", "id": question_id, "text": text}):

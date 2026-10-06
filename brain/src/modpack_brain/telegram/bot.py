@@ -97,13 +97,14 @@ class TelegramBot:
             log.exception("telegram: не удалось отправить событие")
             return None
 
-    async def mirror_game_question(self, player: str, question: str, answer: str) -> None:
+    async def mirror_game_question(self, player: str, question: str, answer: str, session_id: str | None) -> None:
         """Копия вопроса /ai из игры и ответа на него."""
         posted = await self.notify(
             f"🎮 <b>{html.escape(player)}</b> спросил в игре: <i>{html.escape(question)}</i>", silent=True
         )
         if posted is not None:
-            await self._send_answer(posted, answer, None, silent=True)
+            # С сессией: reply на этот ответ продолжит разговор, начатый в игре.
+            await self._send_answer(posted, answer, session_id, silent=True)
 
     # ---------- маршрутизация ----------
 

@@ -23,8 +23,8 @@ async def test_answer_sent_mirrored_and_session_continues():
         sent.append(message)
         return True
 
-    async def mirror(player, question, answer):
-        mirrored.append((player, question, answer))
+    async def mirror(player, question, answer, session_id):
+        mirrored.append((player, question, answer, session_id))
 
     assistant = FakeAssistant()
     game = GameAi(assistant, send, mirror, daily_limit=5)
@@ -34,7 +34,7 @@ async def test_answer_sent_mirrored_and_session_continues():
         {"type": "ai_answer", "id": "q1", "text": "ответ 1"},
         {"type": "ai_answer", "id": "q2", "text": "ответ 2"},
     ]
-    assert mirrored[0] == ("Vasya", "привет", "ответ 1")
+    assert mirrored[0] == ("Vasya", "привет", "ответ 1", "s1")
     assert assistant.calls[1]["session_id"] == "s1"
 
 
@@ -59,3 +59,19 @@ def test_eval_check():
         "в ответе нет ни одного из: iron",
         "не вызван item_recipes",
     ]
+
+
+async def test_continue_specific_answer_by_another_player():
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+        return True
+
+    assistant = FakeAssistant()
+    game = GameAi(assistant, send, None, daily_limit=10)
+    await game.handle({"id": "a1", "player": "Vasya", "uuid": "u1", "question": "первый"})
+    await game.handle({"id": "b1", "player": "Petya", "uuid": "u2", "question": "уточню", "continue": "a1"})
+    assert assistant.calls[1]["session_id"] == "s1"  # Петя продолжил разговор Васи
+    await game.handle({"id": "c1", "player": "Petya", "uuid": "u2", "question": "?", "continue": "zzz"})
+    assert "не помню" in sent[-1]["text"]

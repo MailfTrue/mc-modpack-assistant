@@ -46,11 +46,15 @@ public final class GameAi {
 	}
 
 	public void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+		// /ai re <id> <вопрос> — продолжить конкретный разговор (подставляется кнопкой «уточнить» под ответом).
 		dispatcher.register(Commands.literal("ai")
-				.then(Commands.argument("question", StringArgumentType.greedyString()).executes(this::ask)));
+				.then(Commands.literal("re").then(Commands.argument("id", StringArgumentType.word())
+						.then(Commands.argument("question", StringArgumentType.greedyString())
+								.executes(ctx -> ask(ctx, StringArgumentType.getString(ctx, "id"))))))
+				.then(Commands.argument("question", StringArgumentType.greedyString()).executes(ctx -> ask(ctx, null))));
 	}
 
-	private int ask(CommandContext<CommandSourceStack> ctx) {
+	private int ask(CommandContext<CommandSourceStack> ctx, String continueId) {
 		CommandSourceStack source = ctx.getSource();
 		ServerPlayer player = source.getPlayer();
 		String question = StringArgumentType.getString(ctx, "question").strip();
@@ -67,7 +71,8 @@ public final class GameAi {
 			return 0;
 		}
 		String name = player != null ? player.getGameProfile().getName() : "Console";
-		String id = UUID.randomUUID().toString();
+		// Короткий id: он попадает в команду /ai re <id> из кнопки «уточнить».
+		String id = UUID.randomUUID().toString().substring(0, 8);
 		pending.put(id, uuid);
 		if (player != null) {
 			rememberMeBlock(player);
@@ -86,6 +91,9 @@ public final class GameAi {
 			}
 		}
 		json.addProperty("question", question);
+		if (continueId != null) {
+			json.addProperty("continue", continueId);
+		}
 		client.send(json);
 
 		source.getServer().getPlayerList().broadcastSystemMessage(GameText.question(name, question), false);
@@ -121,7 +129,7 @@ public final class GameAi {
 			return; // устаревший ответ (например, после переподключения)
 		}
 		String text = message.has("text") ? message.get("text").getAsString() : "";
-		server.getPlayerList().broadcastSystemMessage(GameText.answer(text), false);
+		server.getPlayerList().broadcastSystemMessage(GameText.answer(text, id), false);
 	}
 
 	/** Соединение с brain пропало — ответов на висящие вопросы не будет (серверный поток). */

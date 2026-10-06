@@ -157,7 +157,7 @@ async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -
     async def on_ai_question(message: dict[str, Any]) -> None:
         await game.handle(message)
 
-    async def mirror(player: str, question: str, answer: str) -> None:
+    async def mirror(player: str, question: str, answer: str, _session_id: str | None) -> None:
         print(f"🎮 {player} спросил в игре: {question}\n{answer}", flush=True)
 
     async def on_line(line: str) -> None:
