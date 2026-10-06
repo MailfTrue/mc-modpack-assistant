@@ -93,3 +93,45 @@ def test_me_storage_top_and_craft_only():
     assert "Крупнейшие запасы" in format_me_storage(ME, {})
     text = format_me_storage(ME, {}, "processor")
     assert "можно заказать автокрафтом: ae2:logic_processor" in text
+
+
+NEARBY = {
+    "radius": 16,
+    "player_pos": "0 64 0",
+    "skipped_unlooted": 1,
+    "total_found": 2,
+    "containers": [
+        {
+            "block": "minecraft:chest",
+            "name": "Chest",
+            "pos": "2 64 0",
+            "distance": 2,
+            "items": [{"id": "minecraft:diamond", "count": 12}, {"id": "minecraft:coal", "count": 64}],
+        },
+        {
+            "block": "minecraft:barrel",
+            "name": "Barrel",
+            "pos": "0 64 9",
+            "distance": 9,
+            "items": [{"id": "minecraft:diamond", "count": 3}],
+        },
+    ],
+}
+
+
+def test_nearby_query_lists_locations():
+    from modpack_brain.knowledge.live import format_nearby
+
+    names = {"minecraft:diamond": "Diamond / Алмаз [minecraft:diamond]"}
+    text = format_nearby(NEARBY, names, "алмаз")
+    assert "ещё 1 с нетронутым лутом (не показываю)" in text
+    assert "«алмаз»: найдено 15 шт. в 2 хранилищах" in text
+    assert "- 12× Diamond / Алмаз [minecraft:diamond] — Chest на 2 64 0 (2 бл.)" in text
+    assert "coal" not in text
+
+
+def test_nearby_overview():
+    from modpack_brain.knowledge.live import format_nearby
+
+    text = format_nearby(NEARBY, {})
+    assert "- Chest на 2 64 0 (2 бл.): 64× minecraft:coal, 12× minecraft:diamond" in text

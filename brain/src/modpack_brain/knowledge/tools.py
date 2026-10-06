@@ -23,6 +23,7 @@ TOOL_NAMES = [
         "team_progress",
         "player_inventory",
         "me_storage",
+        "nearby_containers",
     )
 ]
 
@@ -132,5 +133,36 @@ def build_server(knowledge: Knowledge, live: LiveServer | None = None) -> McpSdk
             text = await live.me_storage(str(args.get("player", "")), str(args.get("query", "")))
         return {"content": [{"type": "text", "text": text}]}
 
-    tools = [find_item, item_recipes, tag_items, list_mods, search_quests, team_progress, player_inventory, me_storage]
+    @tool(
+        "nearby_containers",
+        "Сундуки, бочки, шалкеры и модовые хранилища в радиусе 16 блоков от игрока (только чтение): что где лежит, "
+        "с координатами и расстоянием. Нетронутый лут данжей и ME-блоки не показываются. "
+        "query — что искать (рус./англ. название или id); пусто — содержимое всех хранилищ рядом.",
+        {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string", "description": "ник игрока в Minecraft"},
+                "query": {"type": "string", "description": "что искать, например 'алмаз' или 'minecraft:coal'"},
+            },
+            "required": ["player"],
+        },
+    )
+    async def nearby_containers(args: dict[str, Any]) -> dict[str, Any]:
+        if live is None:
+            text = "Хранилища недоступны в этом режиме."
+        else:
+            text = await live.nearby(str(args.get("player", "")), str(args.get("query", "")))
+        return {"content": [{"type": "text", "text": text}]}
+
+    tools = [
+        find_item,
+        item_recipes,
+        tag_items,
+        list_mods,
+        search_quests,
+        team_progress,
+        player_inventory,
+        me_storage,
+        nearby_containers,
+    ]
     return create_sdk_mcp_server(SERVER_NAME, tools=tools)

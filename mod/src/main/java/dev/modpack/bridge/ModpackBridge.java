@@ -199,6 +199,17 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 				result.add("players", players);
 				result.addProperty("max", s.getPlayerList().getMaxPlayers());
 				response.add("result", result);
+			} else if (method.equals("nearby_containers")) {
+				ServerPlayer player = findPlayer(s, request);
+				if (player == null) {
+					response.addProperty("error", "игрок не в сети");
+				} else {
+					try {
+						response.add("result", NearbyContainers.scan(player));
+					} catch (Exception | LinkageError e) {
+						response.addProperty("error", "не удалось осмотреть хранилища: " + e);
+					}
+				}
 			} else if (method.equals("me_storage")) {
 				ServerPlayer player = findPlayer(s, request);
 				if (!FabricLoader.getInstance().isModLoaded("ae2")) {
