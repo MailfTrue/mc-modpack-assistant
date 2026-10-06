@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from . import prompts
 from .config import Settings
 from .events import format_event
+from .knowledge.live import LiveServer
 from .llm import Assistant
 
 log = logging.getLogger("modpack_brain")
@@ -83,17 +84,21 @@ def main() -> None:
         log.info("остановлено")
 
 
-def _assistant(settings: Settings) -> Assistant:
+def _assistant(settings: Settings, live: LiveServer | None = None) -> Assistant:
     from .knowledge.index import DB_FILE
     from .knowledge.query import Knowledge
     from .knowledge.tools import build_server
+
+    knowledge = Knowledge(settings.server_dir / DB_FILE)
+    if live is not None:
+        live.knowledge = knowledge
 
     return Assistant(
         settings.server_dir,
         model=settings.llm_model,
         max_turns=settings.llm_max_turns,
         timeout=settings.llm_timeout_seconds,
-        mcp_server=build_server(Knowledge(settings.server_dir / DB_FILE)),
+        mcp_server=build_server(knowledge, live),
     )
 
 
@@ -173,7 +178,9 @@ async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -
         on_data_exported,
     )
     await _reindex(settings)
-    game = GameAi(_assistant(settings), bridge.send, mirror, settings.questions_per_user_per_day)
+    live = LiveServer()
+    live.bridge = bridge
+    game = GameAi(_assistant(settings, live), bridge.send, mirror, settings.questions_per_user_per_day)
     await bridge.start()
     loop = asyncio.get_running_loop()
     stop = _watch_stdin(loop, None if exit_on_stdin_eof else on_line)
@@ -217,7 +224,8 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     if settings.telegram_bot_token is None:
         sys.exit("Не задан токен Telegram: telegram.token в config/modpack-bridge.json сервера")
 
-    assistant = _assistant(settings)
+    live = LiveServer()
+    assistant = _assistant(settings, live)
     telegram = TelegramBot(
         settings.telegram_bot_token.get_secret_value(),
         assistant,
@@ -248,6 +256,7 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     await _reindex(settings)
     game = GameAi(assistant, bridge.send, telegram.mirror_game_question, settings.questions_per_user_per_day)
     telegram.bridge = bridge
+    live.bridge = bridge
     if settings.resolve_bridge_token() is None:
         log.warning("мост: токена пока нет — он появится после первого запуска сервера с модом")
     await bridge.start()

@@ -198,6 +198,11 @@ class Knowledge:
             parts.insert(0, f"Команду игрока «{player}» не нашёл — показываю все.")
         return "\n\n".join(parts)
 
+    def names(self, ids: list[str]) -> dict[str, str]:
+        """id предметов → «Название / Русское [id]»."""
+        with self._db() as db:
+            return {i: self._name(db, i) for i in ids}
+
     def _item_names(self, texts: list[str]) -> dict[str, str]:
         """id предметов, упомянутых в текстах → «Название [id]»."""
         ids = {m for text in texts for m in _ID_IN_TEXT.findall(text)}

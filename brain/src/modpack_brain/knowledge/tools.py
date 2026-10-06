@@ -8,16 +8,25 @@ from typing import Annotated, Any
 
 from claude_agent_sdk import McpSdkServerConfig, create_sdk_mcp_server, tool
 
+from .live import LiveServer
 from .query import Knowledge
 
 SERVER_NAME = "pack"
 TOOL_NAMES = [
     f"mcp__{SERVER_NAME}__{name}"
-    for name in ("find_item", "item_recipes", "tag_items", "list_mods", "search_quests", "team_progress")
+    for name in (
+        "find_item",
+        "item_recipes",
+        "tag_items",
+        "list_mods",
+        "search_quests",
+        "team_progress",
+        "player_inventory",
+    )
 ]
 
 
-def build_server(knowledge: Knowledge) -> McpSdkServerConfig:
+def build_server(knowledge: Knowledge, live: LiveServer | None = None) -> McpSdkServerConfig:
     async def run(fn: Callable[..., str], *args: Any) -> dict[str, Any]:
         if not knowledge.available():
             text = "Индекс сборки ещё не построен (сервер не делал выгрузку). Ищи по файлам."
@@ -87,6 +96,18 @@ def build_server(knowledge: Knowledge) -> McpSdkServerConfig:
     async def team_progress(args: dict[str, Any]) -> dict[str, Any]:
         return await run(knowledge.team_progress, str(args.get("player", "")))
 
-    return create_sdk_mcp_server(
-        SERVER_NAME, tools=[find_item, item_recipes, tag_items, list_mods, search_quests, team_progress]
+    @tool(
+        "player_inventory",
+        "Текущий инвентарь игрока онлайн (прямо с сервера): броня, руки, хотбар, инвентарь, эндер-сундук, "
+        "чары и прочность. Для вопросов «что у меня есть», «что улучшить», «хватит ли ресурсов на крафт».",
+        {"player": Annotated[str, "ник игрока в Minecraft"]},
     )
+    async def player_inventory(args: dict[str, Any]) -> dict[str, Any]:
+        if live is None:
+            text = "Инвентарь недоступен в этом режиме."
+        else:
+            text = await live.inventory(str(args.get("player", "")))
+        return {"content": [{"type": "text", "text": text}]}
+
+    tools = [find_item, item_recipes, tag_items, list_mods, search_quests, team_progress, player_inventory]
+    return create_sdk_mcp_server(SERVER_NAME, tools=tools)

@@ -192,6 +192,20 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 				result.add("players", players);
 				result.addProperty("max", s.getPlayerList().getMaxPlayers());
 				response.add("result", result);
+			} else if (method.equals("inventory")) {
+				String name = request.has("player") ? request.get("player").getAsString() : "";
+				ServerPlayer player = s.getPlayerList().getPlayers().stream()
+						.filter(p -> p.getGameProfile().getName().equalsIgnoreCase(name))
+						.findFirst().orElse(null);
+				if (player == null) {
+					response.addProperty("error", "игрок " + name + " не в сети");
+				} else {
+					try {
+						response.add("result", InventoryExport.of(player));
+					} catch (Exception | LinkageError e) {
+						response.addProperty("error", "не удалось прочитать инвентарь: " + e);
+					}
+				}
 			} else {
 				response.addProperty("error", "unknown method: " + method);
 			}
