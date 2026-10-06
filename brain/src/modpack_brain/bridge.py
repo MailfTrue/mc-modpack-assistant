@@ -23,6 +23,8 @@ from websockets.http11 import Request, Response
 log = logging.getLogger(__name__)
 
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
+# Ответы мода бывают крупными (вся ME-сеть, хранилища вокруг) — с запасом относительно 1 МБ по умолчанию.
+MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 
 
 class BridgeError(Exception):
@@ -57,7 +59,13 @@ class Bridge:
 
     async def start(self) -> None:
         self._server = await serve(
-            self._handle, self.host, self.port, process_request=self._authorize, ping_interval=20, ping_timeout=20
+            self._handle,
+            self.host,
+            self.port,
+            process_request=self._authorize,
+            ping_interval=20,
+            ping_timeout=20,
+            max_size=MAX_MESSAGE_BYTES,
         )
         log.info("мост: слушаю ws://%s:%d", self.host, self.port)
 

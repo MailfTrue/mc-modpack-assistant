@@ -119,6 +119,46 @@ def split_markdown(markdown: str, limit: int = CHUNK_SOURCE_LIMIT) -> list[str]:
     return pieces
 
 
-def render(markdown: str) -> list[str]:
-    """Готовые к отправке HTML-сообщения."""
-    return [to_telegram_html(chunk) for chunk in split_markdown(markdown)]
+def render(markdown: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
+    """Готовые к отправке HTML-сообщения, каждое гарантированно не длиннее лимита Telegram.
+
+    После конвертации текст растёт (экранирование &lt;, теги), поэтому кусок, не влезший в лимит,
+    режем мельче и конвертируем заново.
+    """
+    out: list[str] = []
+    for chunk in split_markdown(markdown):
+        out += _render_chunk(chunk, limit)
+    return out
+
+
+def _render_chunk(chunk: str, limit: int) -> list[str]:
+    html_text = to_telegram_html(chunk)
+    if len(html_text) <= limit:
+        return [html_text] if html_text.strip() else []
+    smaller = split_markdown(chunk, limit=max(len(chunk) // 2, 1))
+    if len(smaller) <= 1:
+        # Один неделимый кусок (например, одна очень длинная строка) — режем «в лоб» как обычный текст.
+        return [html.escape(part, quote=False) for part in split_plain(chunk, limit // 5)]
+    return [part for piece in smaller for part in _render_chunk(piece, limit)]
+
+
+def split_plain(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
+    """Простой текст на куски не длиннее limit — по строкам, длинные строки — жёстко."""
+    pieces: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.append(line[:limit])
+            line = line[limit:]
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            pieces.append(current)
+            current = line
+        else:
+            current = candidate
+    if current.strip():
+        pieces.append(current)
+    return [p for p in pieces if p.strip()]

@@ -75,3 +75,15 @@ async def test_continue_specific_answer_by_another_player():
     assert assistant.calls[1]["session_id"] == "s1"  # Петя продолжил разговор Васи
     await game.handle({"id": "c1", "player": "Petya", "uuid": "u2", "question": "?", "continue": "zzz"})
     assert "не помню" in sent[-1]["text"]
+
+
+def test_clip_for_game():
+    from modpack_brain.game import clip_for_game
+
+    short = "коротко"
+    assert clip_for_game(short, mirrored=True) == short
+    long = "\n\n".join(f"Абзац {i}: " + "слово " * 30 for i in range(20))
+    clipped = clip_for_game(long, mirrored=True, limit=500)
+    assert len(clipped) < 560
+    assert clipped.endswith("…(полный ответ — в Telegram)")
+    assert "Абзац 0" in clipped

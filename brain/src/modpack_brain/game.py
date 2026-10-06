@@ -19,10 +19,26 @@ log = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 15 * 60
 # Сколько ответов помнить для кнопки «уточнить» (/ai re <id>) и reply из Telegram.
 MAX_ANSWERS = 2000
+# Длиннее — обрезаем в игре (чат маленький); копия в Telegram остаётся полной.
+GAME_MAX_CHARS = 1200
 
 Send = Callable[[dict[str, Any]], Awaitable[bool]]
 # (игрок, вопрос, ответ, id сессии LLM) — копия в Telegram, reply на неё продолжит этот разговор.
 Mirror = Callable[[str, str, str, str | None], Awaitable[None]]
+
+
+def clip_for_game(text: str, *, mirrored: bool, limit: int = GAME_MAX_CHARS) -> str:
+    """Длинный ответ залил бы весь игровой чат: обрезаем по границе абзаца/строки, полный — в Telegram."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for separator in ("\n\n", "\n", ". "):
+        position = cut.rfind(separator)
+        if position > limit // 2:
+            cut = cut[:position]
+            break
+    tail = "полный ответ — в Telegram" if mirrored else "спроси подробнее отдельным вопросом"
+    return f"{cut.rstrip()}\n…({tail})"
 
 
 def build_prompt(player: str, question: str, context: dict[str, Any] | None) -> str:
@@ -77,7 +93,7 @@ class GameAi:
                 self._answers[str(question_id)] = answer.session_id
                 while len(self._answers) > MAX_ANSWERS:
                     self._answers.popitem(last=False)
-        await self._reply(question_id, answer.text)
+        await self._reply(question_id, clip_for_game(answer.text, mirrored=self.mirror is not None))
         if self.mirror is not None:
             await self.mirror(player, question, answer.text, answer.session_id)
 

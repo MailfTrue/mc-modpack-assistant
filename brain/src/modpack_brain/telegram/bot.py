@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from datetime import date
 
 from aiogram import Bot, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from aiogram.utils.chat_action import ChatActionSender
@@ -19,9 +21,13 @@ from aiogram.utils.chat_action import ChatActionSender
 from .. import prompts
 from ..bridge import Bridge, BridgeError
 from ..llm import Assistant, Image
-from .format import render
+from .format import render, split_plain
 
 log = logging.getLogger(__name__)
+
+# Пауза между частями длинного ответа и повторы отправки (лимит частоты Telegram, разовые сбои сети).
+CHUNK_PAUSE_SECONDS = 0.4
+SEND_ATTEMPTS = 4
 
 HELP = (
     "Я помощник по сборке <b>Prominence II</b>.\n\n"
@@ -205,16 +211,31 @@ class TelegramBot:
         await self.bridge.send({"type": "chat", "from": message.from_user.full_name, "text": text})
 
     async def _send_answer(self, message: Message, text: str, session_id: str | None, *, silent: bool = True) -> None:
+        """Ответ цепочкой сообщений: каждый кусок — reply на предыдущий, у каждого своя связь с сессией."""
         target = message
-        for chunk in render(text):
+        chunks = render(text)
+        for number, chunk in enumerate(chunks):
+            if number:
+                await asyncio.sleep(CHUNK_PAUSE_SECONDS)  # не упираться в лимит частоты Telegram
             try:
-                sent = await target.reply(chunk, disable_notification=silent)
+                sent_messages = [await _with_retry(lambda c=chunk, t=target: t.reply(c, disable_notification=silent))]
             except TelegramBadRequest as error:
                 log.warning("telegram: HTML не принят (%s), шлю как текст", error)
-                sent = await target.reply(_strip_tags(chunk), parse_mode=None, disable_notification=silent)
-            if session_id:
-                self._sessions.put((sent.chat.id, sent.message_id), session_id)
-            target = sent
+                sent_messages = []
+                for part in split_plain(_strip_tags(chunk)):
+                    sent_messages.append(
+                        await _with_retry(
+                            lambda p=part, t=target: t.reply(p, parse_mode=None, disable_notification=silent)
+                        )
+                    )
+                    target = sent_messages[-1]
+            except TelegramAPIError as error:
+                log.error("telegram: не удалось отправить часть %d/%d ответа: %s", number + 1, len(chunks), error)
+                return
+            for sent in sent_messages:
+                if session_id:
+                    self._sessions.put((sent.chat.id, sent.message_id), session_id)
+            target = sent_messages[-1]
 
     async def _images(self, message: Message) -> list[Image]:
         file_id, media_type = None, "image/jpeg"
@@ -245,6 +266,23 @@ def _relay_text(message: Message) -> str | None:
         label = ""
     combined = f"{label} {text}".strip()
     return combined or None
+
+
+async def _with_retry[T](send: Callable[[], Awaitable[T]]) -> T:
+    """Отправка с повтором: при 429 ждём, сколько сказал Telegram; при сбое сети — нарастающая пауза."""
+    for attempt in range(1, SEND_ATTEMPTS + 1):
+        try:
+            return await send()
+        except TelegramRetryAfter as error:
+            if attempt == SEND_ATTEMPTS:
+                raise
+            log.warning("telegram: лимит частоты, жду %s с", error.retry_after)
+            await asyncio.sleep(error.retry_after + 0.5)
+        except TelegramNetworkError:
+            if attempt == SEND_ATTEMPTS:
+                raise
+            await asyncio.sleep(attempt * 2)
+    raise AssertionError("unreachable")
 
 
 def _strip_tags(text: str) -> str:
