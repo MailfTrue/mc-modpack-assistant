@@ -5,6 +5,8 @@ import com.google.gson.JsonObject;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -13,6 +15,7 @@ import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.advancements.DisplayInfo;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
@@ -53,6 +56,7 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 		client.start(brain != null ? Duration.ofSeconds(3) : Duration.ZERO);
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> gameAi.register(dispatcher));
 		registerEvents();
+		Highlighter.register();
 		LOG.info("Modpack Bridge {} started, brain: {}", version, config.url);
 	}
 
@@ -199,6 +203,24 @@ public final class ModpackBridge implements DedicatedServerModInitializer {
 				result.add("players", players);
 				result.addProperty("max", s.getPlayerList().getMaxPlayers());
 				response.add("result", result);
+			} else if (method.equals("highlight")) {
+				ServerPlayer player = findPlayer(s, request);
+				if (player == null) {
+					response.addProperty("error", "игрок не в сети");
+				} else {
+					List<BlockPos> positions = new ArrayList<>();
+					if (request.has("positions")) {
+						for (var element : request.getAsJsonArray("positions")) {
+							String[] xyz = element.getAsString().split(" ");
+							positions.add(new BlockPos(
+									Integer.parseInt(xyz[0]), Integer.parseInt(xyz[1]), Integer.parseInt(xyz[2])));
+						}
+					}
+					JsonObject result = new JsonObject();
+					result.addProperty("highlighted", Highlighter.highlight(player.serverLevel(), positions));
+					result.addProperty("seconds", 30);
+					response.add("result", result);
+				}
 			} else if (method.equals("nearby_containers")) {
 				ServerPlayer player = findPlayer(s, request);
 				if (player == null) {

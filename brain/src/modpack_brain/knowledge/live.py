@@ -75,7 +75,16 @@ class LiveServer:
             return f"Не удалось: {error}"
         ids = sorted({i["id"] for c in data.get("containers") or [] for i in c.get("items") or []})
         names = self.knowledge.names(ids) if self.knowledge and self.knowledge.available() else {}
-        return format_nearby(data, names, query)
+        highlighted = 0
+        if query.strip():
+            positions = list(dict.fromkeys(c["pos"] for c, _ in matching(data, names, query)))
+            if positions:
+                try:
+                    result = await self.bridge.request("highlight", player=player, positions=positions)
+                    highlighted = int(result.get("highlighted", 0))
+                except BridgeError:
+                    pass  # без подсветки — просто ответим списком
+        return format_nearby(data, names, query, highlighted)
 
     async def _online(self) -> list[str]:
         from ..bridge import BridgeError
@@ -213,10 +222,21 @@ def format_me_storage(data: dict[str, Any], names: dict[str, str], query: str = 
 MAX_CONTAINER_LINES = 20
 
 
-def format_nearby(data: dict[str, Any], names: dict[str, str], query: str = "") -> str:
-    """Хранилища рядом с игроком: с запросом — где лежит нужное, без — что в каждом хранилище."""
+def matching(data: dict[str, Any], names: dict[str, str], query: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """(хранилище, предмет) для предметов, подходящих под запрос (все слова — в id или названиях)."""
+    words = query.lower().split()
+
+    def matches(item_id: str) -> bool:
+        text = f"{item_id} {names.get(item_id, '')}".lower()
+        return all(w in text for w in words)
+
+    return [(c, i) for c in data.get("containers") or [] for i in c.get("items") or [] if matches(i["id"])]
+
+
+def format_nearby(data: dict[str, Any], names: dict[str, str], query: str = "", highlighted: int = 0) -> str:
+    """Хранилища рядом с игроком. Без координат: нужное подсвечивается в игре."""
     containers: list[dict[str, Any]] = data.get("containers") or []
-    head = f"Хранилища в радиусе {data.get('radius', '?')} блоков от игрока ({data.get('player_pos', '?')}): "
+    head = f"Хранилища в радиусе {data.get('radius', '?')} блоков от игрока: "
     head += f"{data.get('total_found', len(containers))} с содержимым"
     if data.get("skipped_unlooted"):
         head += f"; ещё {data['skipped_unlooted']} с нетронутым лутом (не показываю)"
@@ -225,24 +245,23 @@ def format_nearby(data: dict[str, Any], names: dict[str, str], query: str = "") 
     def label(item_id: str) -> str:
         return names.get(item_id) or item_id
 
-    def where(c: dict[str, Any]) -> str:
-        return f"{c.get('name', c.get('block'))} на {c.get('pos')} ({c.get('distance')} бл.)"
-
     if query.strip():
-        words = query.lower().split()
-
-        def matches(item_id: str) -> bool:
-            text = f"{item_id} {names.get(item_id, '')}".lower()
-            return all(w in text for w in words)
-
-        hits = [(c, i) for c in containers for i in c.get("items") or [] if matches(i["id"])]
+        hits = matching(data, names, query)
         total = sum(i["count"] for _, i in hits)
-        lines.append(f"«{query}»: найдено {total} шт. в {len({id(c) for c, _ in hits})} хранилищах")
-        lines += [f"- {i['count']}× {label(i['id'])} — {where(c)}" for c, i in hits[:MAX_CONTAINER_LINES]]
+        places = len({id(c) for c, _ in hits})
+        lines.append(f"«{query}»: найдено {total} шт. в {places} хранилищах")
+        lines += [
+            f"- {i['count']}× {label(i['id'])} — {c.get('name', c.get('block'))}" for c, i in hits[:MAX_CONTAINER_LINES]
+        ]
+        if highlighted:
+            lines.append(
+                f"Эти хранилища ({highlighted}) подсвечены в игре золотым контуром на 30 секунд — видно сквозь стены. "
+                "Координаты игроку не называй, просто скажи, что подсветил."
+            )
     else:
         for c in containers[:MAX_CONTAINER_LINES]:
             items = sorted(c.get("items") or [], key=lambda i: -i["count"])
             shown = ", ".join(f"{i['count']}× {label(i['id'])}" for i in items[:8])
             more = f" и ещё {len(items) - 8} видов" if len(items) > 8 else ""
-            lines.append(f"- {where(c)}: {shown}{more}")
+            lines.append(f"- {c.get('name', c.get('block'))}: {shown}{more}")
     return "\n".join(lines)

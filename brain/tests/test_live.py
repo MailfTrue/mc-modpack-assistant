@@ -126,7 +126,9 @@ def test_nearby_query_lists_locations():
     text = format_nearby(NEARBY, names, "алмаз")
     assert "ещё 1 с нетронутым лутом (не показываю)" in text
     assert "«алмаз»: найдено 15 шт. в 2 хранилищах" in text
-    assert "- 12× Diamond / Алмаз [minecraft:diamond] — Chest на 2 64 0 (2 бл.)" in text
+    assert "- 12× Diamond / Алмаз [minecraft:diamond] — Chest" in text
+    assert "2 64 0" not in text  # координаты не показываем
+    assert "подсвечены" in format_nearby(NEARBY, names, "алмаз", highlighted=2)
     assert "coal" not in text
 
 
@@ -134,4 +136,4 @@ def test_nearby_overview():
     from modpack_brain.knowledge.live import format_nearby
 
     text = format_nearby(NEARBY, {})
-    assert "- Chest на 2 64 0 (2 бл.): 64× minecraft:coal, 12× minecraft:diamond" in text
+    assert "- Chest: 64× minecraft:coal, 12× minecraft:diamond" in text
