@@ -2,8 +2,8 @@
 # Деплой на сервер (Git Bash / Linux / macOS):
 #   1) проверки локально: ruff + pytest brain, сборка и тесты мода;
 #   2) git push;
-#   3) если версия мода (mod/gradle.properties) новее установленной — jar на сервер;
-#   4) mc-update на сервере: git pull, uv sync, перезапуск только того, что поменялось.
+#   3) новая версия мода (mod/gradle.properties) — GitHub Release v<версия> с jar (нужен gh, `gh auth login`);
+#   4) mc-update на сервере: git pull, uv sync, jar из релиза, перезапуск только того, что поменялось.
 #
 #   deploy/deploy.sh [--now|--when-empty|--no-restart]    (флаги передаются в mc-update)
 #
@@ -16,12 +16,14 @@ cd "$(dirname "$0")/.."
 REMOTE_REPO="${REMOTE_REPO:-mc-modpack-assistant}"  # относительно домашней папки на сервере
 REMOTE_SERVER="${REMOTE_SERVER:-server}"
 remote() { ssh -o BatchMode=yes "$DEPLOY_SSH" "$@"; }
+GH=$(command -v gh || echo "/c/Program Files/GitHub CLI/gh.exe")
 
 step() { printf '\n== %s\n' "$*"; }
 
 step "git"
 [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "деплой только из main" >&2; exit 1; }
 git diff --quiet && git diff --cached --quiet || { echo "есть незакоммиченные изменения" >&2; exit 1; }
+"$GH" auth status >/dev/null 2>&1 || { echo "gh не залогинен: gh auth login" >&2; exit 1; }
 
 version=$(sed -n 's/^mod_version=//p' mod/gradle.properties | tr -d '\r')
 jar="mod/build/libs/modpack-bridge-$version.jar"
@@ -34,7 +36,9 @@ if ! git cat-file -e "$deployed" 2>/dev/null; then
 fi
 mod_changed=false
 git diff --quiet "$deployed" HEAD -- mod/src mod/build.gradle mod/gradle.properties || mod_changed=true
-if [ "$mod_changed" = true ] && [ "$version" = "$installed" ]; then
+released=false
+"$GH" release view "v$version" >/dev/null 2>&1 && released=true
+if [ "$mod_changed" = true ] && { [ "$version" = "$installed" ] || [ "$released" = true ]; }; then
   echo "мод изменился, а mod_version всё ещё $version — подними версию в mod/gradle.properties" >&2
   exit 1
 fi
@@ -49,14 +53,16 @@ step "мод: сборка и тесты"
 step "git push"
 git push -q origin main
 
-step "на сервер"
-remote "mkdir -p bin deploy"
+if [ "$released" = false ]; then
+  step "релиз v$version"
+  "$GH" release create "v$version" "$jar" --target "$(git rev-parse HEAD)" \
+    --title "Mod $version" --notes "modpack-bridge $version ($(git rev-parse --short HEAD))"
+fi
+
+step "скрипты на сервер"
+remote "mkdir -p bin"
 scp -q deploy/mc deploy/mc-update "$DEPLOY_SSH:bin/"
 remote "chmod +x bin/mc bin/mc-update"
-if [ "$version" != "$installed" ]; then
-  scp -q "$jar" "$DEPLOY_SSH:deploy/"
-  echo "мод $version загружен"
-fi
 
 step "mc-update $*"
 remote "bin/mc-update $*"

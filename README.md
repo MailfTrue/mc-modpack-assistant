@@ -106,9 +106,10 @@ deploy/deploy.sh                 # перезапуск с предупрежд�
 deploy/deploy.sh --when-empty    # дождаться, пока все выйдут (или --now, --no-restart)
 ```
 
-`deploy.sh` прогоняет тесты brain и мода, делает `git push`, отправляет jar, если `mod_version` новее
-установленного (поменял код мода — подними версию, иначе скрипт остановится), и запускает на сервере
-`deploy/mc-update`: `git pull` + `uv sync`, установка jar (старый — в `mods-backup/`). Изменился только brain —
+`deploy.sh` прогоняет тесты brain и мода, делает `git push`, для новой `mod_version` создаёт GitHub Release
+`v<версия>` с jar (нужен [GitHub CLI](https://cli.github.com/) и один раз `gh auth login`; поменял код мода —
+подними версию, иначе скрипт остановится) и запускает на сервере `deploy/mc-update`: `git pull` + `uv sync`,
+jar из последнего релиза со сверкой SHA-256 (старый — в `mods-backup/`). Изменился только brain —
 перезапускается только он (мод поднимает его сам), сервер не трогается. На сервере ожидаются клон репозитория
 в `~/mc-modpack-assistant`, сервер в `~/server` со службой systemd `minecraft` и включённый RCON
 (`deploy/mc` — консоль через RCON: `mc list`, `mc say …`).

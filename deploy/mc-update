@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Обновление на сервере (запускает deploy.sh по ssh, можно и руками):
-#   код brain — git pull; новый jar мода — из ~/deploy (кладёт туда deploy.sh); затем перезапуск, если нужен.
+#   код brain — git pull; мод — jar из последнего GitHub Release репозитория, если он новее установленного;
+#   затем перезапуск, если нужен.
 #
 #   mc-update               перезапуск сервера с предупреждением игрокам за 60 с
 #   mc-update --now         сразу
@@ -13,7 +14,6 @@ set -euo pipefail
 REPO="${REPO_DIR:-$HOME/mc-modpack-assistant}"
 SERVER="${SERVER_DIR:-$HOME/server}"
 SERVICE="${MC_SERVICE:-minecraft}"
-INBOX="$HOME/deploy"
 MC="$(dirname "$0")/mc"
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -45,17 +45,40 @@ else
 fi
 (cd "$REPO/brain" && uv sync -q --frozen)
 
-# --- мод ---
+# --- мод: последний GitHub Release ---
 server_restart=false
-jar=$(ls "$INBOX"/modpack-bridge-*.jar 2>/dev/null | head -1 || true)
-if [ -n "$jar" ]; then
-  mkdir -p "$SERVER/mods-backup"
-  for installed in "$SERVER"/mods/modpack-bridge-*.jar; do
-    [ -e "$installed" ] && mv "$installed" "$SERVER/mods-backup/"
-  done
-  mv "$jar" "$SERVER/mods/"
-  echo "мод: установлен $(basename "$jar") (старый — в mods-backup/)"
-  server_restart=true
+slug=$(git -C "$REPO" remote get-url origin | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')
+# «имя url sha256» jar-файла из последнего релиза; пусто — релиза нет или GitHub недоступен.
+release=$(curl -fsSL --max-time 30 "https://api.github.com/repos/$slug/releases/latest" 2>/dev/null | python3 -c '
+import json, sys
+for asset in json.load(sys.stdin).get("assets", []):
+    if asset["name"].startswith("modpack-bridge-") and asset["name"].endswith(".jar"):
+        print(asset["name"], asset["browser_download_url"], (asset.get("digest") or "").removeprefix("sha256:"))
+        break
+' 2>/dev/null || true)
+if [ -z "$release" ]; then
+  echo "мод: не удалось узнать последний релиз $slug — пропускаю"
+else
+  read -r name url sha <<<"$release"
+  if [ -e "$SERVER/mods/$name" ]; then
+    echo "мод: $name уже установлен"
+  else
+    tmp=$(mktemp --suffix=.jar)
+    curl -fsSL --max-time 120 -o "$tmp" "$url"
+    if [ -n "$sha" ] && ! echo "$sha  $tmp" | sha256sum -c --quiet -; then
+      rm -f "$tmp"
+      echo "мод: контрольная сумма $name не совпала — не устанавливаю" >&2
+      exit 1
+    fi
+    mkdir -p "$SERVER/mods-backup"
+    for installed in "$SERVER"/mods/modpack-bridge-*.jar; do
+      [ -e "$installed" ] && mv "$installed" "$SERVER/mods-backup/"
+    done
+    install -m 644 "$tmp" "$SERVER/mods/$name"
+    rm -f "$tmp"
+    echo "мод: установлен $name из релиза (старый — в mods-backup/)"
+    server_restart=true
+  fi
 fi
 
 # --- перезапуск ---
