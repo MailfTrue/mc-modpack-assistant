@@ -1,4 +1,7 @@
-"""Прогон эталонных вопросов (eval/questions.toml) и отчёт в eval/reports/ для ручной проверки."""
+"""Прогон эталонных вопросов и отчёт в eval/reports/ для ручной проверки.
+
+Вопросы: <сервер>/modpack-bridge/eval/questions.toml (под свою сборку), иначе eval/questions.example.toml.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +15,7 @@ from . import prompts
 from .llm import Assistant
 
 EVAL_DIR = Path(__file__).resolve().parents[2] / "eval"
+SERVER_QUESTIONS = Path("modpack-bridge") / "eval" / "questions.toml"
 TOOL_PREFIX = "mcp__pack__"
 
 
@@ -34,8 +38,15 @@ def check(answer: str, tools: list[str], expect: list[str], need_tools: list[str
     return problems
 
 
-async def run_eval(assistant: Assistant, only: list[str] | None = None) -> Path:
-    data = tomllib.loads((EVAL_DIR / "questions.toml").read_text(encoding="utf-8"))
+def questions_file(server_dir: Path) -> Path:
+    own = server_dir / SERVER_QUESTIONS
+    return own if own.exists() else EVAL_DIR / "questions.example.toml"
+
+
+async def run_eval(assistant: Assistant, server_dir: Path, only: list[str] | None = None) -> Path:
+    source = questions_file(server_dir)
+    print(f"Вопросы: {source}", flush=True)
+    data = tomllib.loads(source.read_text(encoding="utf-8"))
     results = []
     for item in data["question"]:
         if only and item["id"] not in only:

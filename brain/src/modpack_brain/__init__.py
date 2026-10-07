@@ -1,1 +1,1 @@
-"""ИИ-помощник по сборке Prominence II и мост Telegram ↔ Minecraft."""
+"""ИИ-помощник по модпаку Minecraft и мост Telegram ↔ Minecraft."""

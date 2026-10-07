@@ -41,16 +41,28 @@ def clip_for_game(text: str, *, mirrored: bool, limit: int = GAME_MAX_CHARS) -> 
     return f"{cut.rstrip()}\n…({tail})"
 
 
-def build_prompt(player: str, question: str, context: dict[str, Any] | None) -> str:
+def build_prompt(player: str, question: str, context: dict[str, Any] | None, inventory: str = "") -> str:
     prompt = f"Вопрос от игрока {player} (в игре):\n{question}"
     if context:
         prompt += "\n\nКонтекст игрока (данные из игры):\n" + json.dumps(context, ensure_ascii=False, indent=1)
+    if inventory:
+        prompt += "\n\nИнвентарь игрока прямо сейчас (уже получен, повторно запрашивать не нужно):\n" + inventory
     return prompt
 
 
 class GameAi:
-    def __init__(self, assistant: Assistant, send: Send, mirror: Mirror | None, daily_limit: int) -> None:
+    def __init__(
+        self,
+        assistant: Assistant,
+        send: Send,
+        mirror: Mirror | None,
+        daily_limit: int,
+        inventory: Callable[[str], Awaitable[str]] | None = None,
+    ) -> None:
         self.assistant = assistant
+        # Инвентарь прикладываем к каждому вопросу из игры: мгновенный запрос к серверу,
+        # и ИИ не тратит на него отдельный шаг и не забывает про него.
+        self.inventory = inventory
         self.send = send
         self.mirror = mirror
         self.daily_limit = daily_limit
@@ -83,7 +95,7 @@ class GameAi:
             session_id = saved[0]
         log.info("игра: вопрос от %s: %r", player, question[:200])
         answer = await self.assistant.ask(
-            build_prompt(player, question, message.get("context")),
+            build_prompt(player, question, message.get("context"), await self._inventory(player)),
             system_prompt=prompts.GAME,
             session_id=session_id,
         )
@@ -96,6 +108,15 @@ class GameAi:
         await self._reply(question_id, clip_for_game(answer.text, mirrored=self.mirror is not None))
         if self.mirror is not None:
             await self.mirror(player, question, answer.text, answer.session_id)
+
+    async def _inventory(self, player: str) -> str:
+        if self.inventory is None or player in ("", "?", "Console"):
+            return ""
+        try:
+            return await self.inventory(player)
+        except Exception:
+            log.exception("игра: не удалось получить инвентарь %s", player)
+            return ""
 
     async def _reply(self, question_id: Any, text: str) -> None:
         if not await self.send({"type": "ai_answer", "id": question_id, "text": text}):

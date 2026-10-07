@@ -2,7 +2,7 @@ from modpack_brain.bridge import BridgeError
 from modpack_brain.knowledge.live import LiveServer, format_inventory
 
 INVENTORY = {
-    "player": "mailf",
+    "player": "Steve",
     "selected_hotbar_slot": 1,
     "armor": {"head": {"id": "minecraft:iron_helmet", "count": 1, "durability": "120/165"}},
     "hotbar": [
@@ -48,8 +48,8 @@ class FakeBridge:
 
     async def request(self, method, timeout=5.0, **params):
         if method == "online":
-            return {"players": ["mailf"]}
-        if params.get("player") == "mailf":
+            return {"players": ["Steve"]}
+        if params.get("player") == "Steve":
             return INVENTORY
         raise BridgeError("игрок не в сети")
 
@@ -57,11 +57,11 @@ class FakeBridge:
 async def test_live_inventory_and_offline_player():
     live = LiveServer()
     live.bridge = FakeBridge()
-    assert "Инвентарь mailf" in await live.inventory("mailf")
-    offline = await live.inventory("donya")
-    assert "не в сети" in offline and "Сейчас в сети: mailf" in offline
+    assert "Инвентарь Steve" in await live.inventory("Steve")
+    offline = await live.inventory("Alex")
+    assert "не в сети" in offline and "Сейчас в сети: Steve" in offline
     live.bridge = None
-    assert "не подключён" in await live.inventory("mailf")
+    assert "не подключён" in await live.inventory("Steve")
 
 
 ME = {

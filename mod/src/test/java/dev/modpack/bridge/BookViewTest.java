@@ -11,8 +11,8 @@ class BookViewTest {
 	@Test
 	void questionOnFirstPageAndPagesFit() {
 		String answer = String.join("\n", java.util.Collections.nCopies(40, "Строка ответа про боссов и квесты."));
-		List<String> pages = BookView.paginate("Как убить Gauntlet?", answer);
-		assertTrue(pages.get(0).startsWith("*Как убить Gauntlet?*"));
+		List<String> pages = BookView.paginate("Как убить Иссушителя?", answer);
+		assertTrue(pages.get(0).startsWith("*Как убить Иссушителя?*"));
 		assertTrue(pages.size() > 3);
 		for (String page : pages) {
 			assertTrue(page.length() <= BookView.PAGE_CHARS + 1, "page too long: " + page.length());

@@ -81,7 +81,7 @@ def build_server(knowledge: Knowledge, live: LiveServer | None = None) -> McpSdk
         "search_quests",
         "Поиск по квестам сборки (книга квестов FTB — главный гайд по прогрессии): название, глава, задачи, "
         "награды, требования и описание. Квесты на английском — ищи английскими словами (босс, предмет, глава).",
-        {"query": Annotated[str, "например 'gauntlet', 'hasturian era', 'mythril'"]},
+        {"query": Annotated[str, "например 'wither', 'nether', 'diamond' или название главы"]},
     )
     async def search_quests(args: dict[str, Any]) -> dict[str, Any]:
         return await run(knowledge.search_quests, str(args.get("query", "")))

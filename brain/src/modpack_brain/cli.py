@@ -44,7 +44,9 @@ def main() -> None:
     )
     index = sub.add_parser("index", parents=[common], help="пересобрать индекс предметов и рецептов из выгрузки мода")
     index.add_argument("--force", action="store_true", help="пересобрать, даже если выгрузка не менялась")
-    evaluate = sub.add_parser("eval", parents=[common], help="прогнать эталонные вопросы (eval/questions.toml)")
+    evaluate = sub.add_parser(
+        "eval", parents=[common], help="прогнать эталонные вопросы (с сервера или eval/questions.example.toml)"
+    )
     evaluate.add_argument("ids", nargs="*", help="только эти вопросы (по id)")
     ask = sub.add_parser("ask", parents=[common], help="задать вопрос ИИ из консоли")
     ask.add_argument("question", nargs="+")
@@ -68,6 +70,7 @@ def main() -> None:
         settings = Settings()  # type: ignore[call-arg]
     except ValidationError as error:
         sys.exit(f"Ошибка настроек (config/modpack-bridge.json сервера или brain/.env):\n{error}")
+    _configure_prompts(settings)
 
     try:
         if args.command == "ask":
@@ -123,13 +126,20 @@ async def _reindex(settings: Settings) -> None:
         await asyncio.to_thread(ensure_index, settings.server_dir)
     except Exception:
         log.exception("индекс: не удалось пересобрать")
+    _configure_prompts(settings)  # версия игры и число модов могли появиться/измениться с выгрузкой
+
+
+def _configure_prompts(settings: Settings) -> None:
+    pack = prompts.PackInfo.detect(settings.server_dir, settings.pack_name, settings.pack_notes)
+    prompts.configure(pack)
+    log.info("промпт: %s", pack.describe())
 
 
 async def _eval(settings: Settings, ids: list[str]) -> None:
     from .eval import run_eval
 
     await _reindex(settings)
-    report = await run_eval(_assistant(settings), ids or None)
+    report = await run_eval(_assistant(settings), settings.server_dir, ids or None)
     print(f"Отчёт: {report}")
 
 
@@ -192,7 +202,7 @@ async def _bridge_only(settings: Settings, *, exit_on_stdin_eof: bool = False) -
     await _reindex(settings)
     live = LiveServer()
     live.bridge = bridge
-    game = GameAi(_assistant(settings, live), bridge.send, mirror, settings.questions_per_user_per_day)
+    game = GameAi(_assistant(settings, live), bridge.send, mirror, settings.questions_per_user_per_day, live.inventory)
     await bridge.start()
     loop = asyncio.get_running_loop()
     stop = _watch_stdin(loop, None if exit_on_stdin_eof else on_line)
@@ -244,6 +254,7 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
         allowed_chat_ids=settings.allowed_chat_ids,
         events_chat_id=settings.events_chat,
         questions_per_user_per_day=settings.questions_per_user_per_day,
+        pack_name=settings.pack_name,
     )
 
     async def on_event(event: dict[str, Any]) -> None:
@@ -266,7 +277,13 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
         on_data_exported,
     )
     await _reindex(settings)
-    game = GameAi(assistant, bridge.send, telegram.mirror_game_question, settings.questions_per_user_per_day)
+    game = GameAi(
+        assistant,
+        bridge.send,
+        telegram.mirror_game_question,
+        settings.questions_per_user_per_day,
+        live.inventory,
+    )
     telegram.bridge = bridge
     live.bridge = bridge
     if settings.resolve_bridge_token() is None:

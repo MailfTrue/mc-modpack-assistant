@@ -1,0 +1,45 @@
+# Пример эталонных вопросов для `uv run modpack-brain eval`.
+# Вопросы под свою сборку кладите на сервер: <сервер>/modpack-bridge/eval/questions.toml —
+# eval возьмёт их оттуда, а этот файл — только если там ничего нет.
+#
+# expect — хотя бы одна из подстрок должна быть в ответе (без учёта регистра);
+# tools — эти инструменты должны быть вызваны (имя без префикса mcp__pack__).
+# Отчёт с ответами — в eval/reports/, проверять глазами: подстроки ловят только грубые промахи.
+
+[[question]]
+id = "start"
+text = "С чего начать в этой сборке?"
+expect = ["квест"]
+
+[[question]]
+id = "recipe-vanilla"
+text = "Как скрафтить железную кирку?"
+expect = ["iron", "желез"]
+tools = ["item_recipes"]
+
+[[question]]
+id = "ru-name"
+text = "Как получить алмазный меч?"
+expect = ["diamond", "алмаз"]
+tools = ["find_item"]
+
+[[question]]
+id = "uses"
+text = "Где используется железный слиток?"
+expect = ["iron", "желез"]
+tools = ["item_recipes"]
+
+[[question]]
+id = "progress"
+text = "Что нам делать дальше?"
+tools = ["team_progress"]
+
+[[question]]
+id = "mods"
+text = "Какие технические моды есть в сборке?"
+tools = ["list_mods"]
+
+[[question]]
+id = "unknown"
+text = "Как скрафтить Unobtainium Hyper Sword?"
+expect = ["не нашёл", "нет", "не уверен", "не существует"]

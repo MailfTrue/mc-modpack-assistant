@@ -45,6 +45,10 @@ public final class BridgeConfig {
 	}
 
 	public static final class Llm {
+		/** Название сборки для ИИ (пусто — «модпак»). Версию игры и число модов brain узнаёт сам. */
+		public String packName = "";
+		/** Заметки о сборке для ИИ: жанр, особенности, что важно знать (свободный текст). */
+		public String packNotes = "";
 		/** sonnet | opus | haiku или полный id модели. */
 		public String model = "sonnet";
 		public int maxTurns = 30;

@@ -1,7 +1,7 @@
 [project]
 name = "modpack-brain"
 version = "0.1.0"
-description = "ИИ-помощник по сборке Prominence II и мост Telegram ↔ Minecraft"
+description = "ИИ-помощник по модпаку Minecraft и мост Telegram ↔ Minecraft"
 requires-python = ">=3.13"
 dependencies = [
     "aiogram>=3.31.0",

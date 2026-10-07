@@ -87,3 +87,16 @@ def test_clip_for_game():
     assert len(clipped) < 560
     assert clipped.endswith("…(полный ответ — в Telegram)")
     assert "Абзац 0" in clipped
+
+
+async def test_inventory_attached_to_game_question():
+    async def send(message):
+        return True
+
+    async def inventory(player):
+        return f"Инвентарь {player}: 3× Iron Ingot"
+
+    assistant = FakeAssistant()
+    game = GameAi(assistant, send, None, daily_limit=5, inventory=inventory)
+    await game.handle({"id": "q", "player": "Steve", "uuid": "u", "question": "хватит на кирку?"})
+    assert "Инвентарь Steve: 3× Iron Ingot" in assistant.calls[0]["question"]

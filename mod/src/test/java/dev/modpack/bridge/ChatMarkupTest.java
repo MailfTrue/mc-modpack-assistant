@@ -24,12 +24,12 @@ class ChatMarkupTest {
 
 	@Test
 	void itemMarkersAndLinks() {
-		List<Span> spans = ChatMarkup.parse("Скрафти [[minecraft:crafting_table]], см. [вики](https://rpg.prominence.wiki/a_b)");
+		List<Span> spans = ChatMarkup.parse("Скрафти [[minecraft:crafting_table]], см. [вики](https://wiki.example.com/a_b)");
 		Span item = spans.get(1);
 		assertEquals("minecraft:crafting_table", item.itemId());
 		Span link = spans.get(3);
 		assertEquals("вики", link.text());
-		assertEquals("https://rpg.prominence.wiki/a_b", link.link());
+		assertEquals("https://wiki.example.com/a_b", link.link());
 	}
 
 	@Test

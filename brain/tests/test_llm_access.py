@@ -51,7 +51,7 @@ def test_denied(server: Path, tool: str, tool_input: dict):
 
 
 def test_web_allowed(server: Path):
-    assert check_tool_access(server, "WebSearch", {"query": "prominence 2"}) is None
+    assert check_tool_access(server, "WebSearch", {"query": "minecraft wiki"}) is None
 
 
 @pytest.mark.parametrize("pattern", ["*.properties", "server.*", "config/modpack-*.json"])

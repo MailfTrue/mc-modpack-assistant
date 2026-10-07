@@ -30,7 +30,7 @@ CHUNK_PAUSE_SECONDS = 0.4
 SEND_ATTEMPTS = 4
 
 HELP = (
-    "Я помощник по сборке <b>Prominence II</b>.\n\n"
+    "Я помощник по сборке <b>{pack}</b>.\n\n"
     "Как спросить:\n"
     "• <code>/ai как сделать …</code>\n"
     "• упомянуть меня в сообщении\n"
@@ -64,6 +64,7 @@ class TelegramBot:
         events_chat_id: int | None,
         questions_per_user_per_day: int,
         bridge: Bridge | None = None,
+        pack_name: str = "",
     ) -> None:
         # Ответы бота — без звука (не спамим уведомлениями); события сервера задают звук явно в notify().
         self.bot = Bot(
@@ -77,6 +78,7 @@ class TelegramBot:
         self.events_chat_id = events_chat_id
         self.daily_limit = questions_per_user_per_day
         self.bridge = bridge
+        self.pack_name = pack_name or "Minecraft"
         # (chat_id, id сообщения бота) → id сессии LLM, чтобы reply продолжал разговор.
         self._sessions = LRU(capacity=5000)
         self._busy: set[int] = set()
@@ -130,7 +132,7 @@ class TelegramBot:
         await message.reply(f"id этого чата: <code>{message.chat.id}</code>")
 
     async def _help(self, message: Message) -> None:
-        await message.reply(HELP)
+        await message.reply(HELP.replace("{pack}", html.escape(self.pack_name)))
 
     async def _online(self, message: Message) -> None:
         if self.bridge is None or not self.bridge.connected:

@@ -45,6 +45,8 @@ def map_server_config(data: dict[str, Any]) -> dict[str, Any]:
         "telegram_bot_token": telegram.get("token"),
         "allowed_chat_ids": telegram.get("allowedChatIds"),
         "events_chat_id": telegram.get("eventsChatId"),
+        "pack_name": llm.get("packName"),
+        "pack_notes": llm.get("packNotes"),
         "llm_model": llm.get("model"),
         "llm_max_turns": llm.get("maxTurns"),
         "llm_timeout_seconds": llm.get("timeoutSeconds"),
@@ -82,6 +84,10 @@ class Settings(BaseSettings):
 
     # Сервер Minecraft
     server_dir: Path
+
+    # Сборка (для промпта; версию игры и число модов brain узнаёт из выгрузки)
+    pack_name: str = ""
+    pack_notes: str = ""
 
     # LLM
     llm_model: str = "sonnet"

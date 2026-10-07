@@ -1,6 +1,8 @@
 # Minecraft Modpack Assistant
 
-ИИ-помощник по сборке **Prominence II: Hasturian Era** и мост между сервером Minecraft и Telegram.
+ИИ-помощник по модпаку и мост между сервером Minecraft (Fabric) и Telegram.
+Под конкретную сборку ничего не зашито: название и заметки о ней задаются в конфиге сервера
+(`llm.packName`, `llm.packNotes`), версию игры и список модов бот узнаёт сам из выгрузки мода.
 
 - **`mod/`** — серверный Fabric-мод (1.20.1). Запускает brain вместе с сервером и шлёт ему события сервера.
   Игрокам ставить не нужно.
@@ -59,19 +61,28 @@ brain живёт ровно столько, сколько сервер: при 
     "allowedChatIds": [-100…],        // id группы: написать /chatid боту в группе
     "eventsChatId": null              // null — первый из allowedChatIds
   },
-  "llm": { "model": "sonnet", "maxTurns": 30, "timeoutSeconds": 240, "questionsPerUserPerDay": 50 },
+  "llm": {
+    "packName": "Название сборки",      // для ИИ и справки бота; пусто — «модпак»
+    "packNotes": "RPG, квесты FTB…",    // что ИИ стоит знать о сборке (свободный текст)
+    "model": "sonnet", "maxTurns": 30, "timeoutSeconds": 240, "questionsPerUserPerDay": 50
+  },
   "events": { "server": true, "joinLeave": true, "death": true, "advancement": true, "chat": true }
 }
 ```
 
 4. Запустить сервер. В группе появится «🟢 Сервер запущен».
 
-## Русская локализация сборки
+## Переведённые квесты
 
-На клиентах стоит [Prominence II RPG Russian Localization](https://github.com/d0ukesh1/Prominence-2-RPG-Russian-Localization)
-(переводит квесты, таланты, меню и тексты модов при запуске игры). Квесты и таланты задаёт сервер, поэтому
-переведённые `config/ftbquests` и `config/puffish_skills` скопированы с клиента на сервер. Английские оригиналы
-квестов лежат в `<сервер>/modpack-bridge/quests-original/quests` — индекс ИИ ищет по обоим языкам.
+Если у сборки есть русская локализация, которая переводит файлы квестов FTB (книгу квестов задаёт сервер,
+поэтому переведённые `config/ftbquests` копируются с клиента на сервер), положите английские оригиналы в
+`<сервер>/modpack-bridge/quests-original/quests` — индекс ИИ будет искать по обоим языкам, а промпт сам учтёт,
+что квесты переведены.
+
+## Эталонные вопросы
+
+`uv run modpack-brain eval` берёт вопросы из `<сервер>/modpack-bridge/eval/questions.toml` (под свою сборку),
+а если их нет — общий пример `brain/eval/questions.example.toml`.
 
 После обновления сборки: обновить локализацию на клиенте, запустить игру, снова скопировать эти две папки
 на сервер, а свежие английские оригиналы (`config/ftbquests/quests` из сборки до перевода) — в `quests-original`.
@@ -86,7 +97,7 @@ brain живёт ровно столько, сколько сервер: при 
 
 ```powershell
 cd brain
-uv run modpack-brain ask "с чего начать в Prominence II?"   # вопрос ИИ из консоли
+uv run modpack-brain ask "с чего начать в этой сборке?"     # вопрос ИИ из консоли
 uv run modpack-brain index [--force]                      # пересобрать индекс из выгрузки (обычно сам)
 uv run modpack-brain eval [id ...]                        # эталонные вопросы → eval/reports/*.md
 uv run modpack-brain bridge                               # мост без Telegram: события и ответы /ai в консоль;
