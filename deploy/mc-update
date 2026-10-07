@@ -40,6 +40,12 @@ if [ "$old" != "$new" ]; then
   echo "код: ${old:0:7} → ${new:0:7}"
   git -C "$REPO" log --oneline "$old..$new" | sed 's/^/  /'
   git -C "$REPO" diff --quiet "$old" "$new" -- brain || brain_changed=true
+  # Конфиги сервера и служб (Minecraft не перезапускается — только страница статуса и Traefik).
+  if ! git -C "$REPO" diff --quiet "$old" "$new" -- deploy/server; then
+    "$REPO/deploy/server/setup-server.sh" --configs
+  elif ! git -C "$REPO" diff --quiet "$old" "$new" -- deploy/status; then
+    sudo systemctl restart mc-status && echo "страница статуса: перезапущена"
+  fi
 else
   echo "код: без изменений (${new:0:7})"
 fi

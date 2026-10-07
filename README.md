@@ -110,9 +110,35 @@ deploy/deploy.sh --when-empty    # дождаться, пока все выйд�
 `v<версия>` с jar (нужен [GitHub CLI](https://cli.github.com/) и один раз `gh auth login`; поменял код мода —
 подними версию, иначе скрипт остановится) и запускает на сервере `deploy/mc-update`: `git pull` + `uv sync`,
 jar из последнего релиза со сверкой SHA-256 (старый — в `mods-backup/`). Изменился только brain —
-перезапускается только он (мод поднимает его сам), сервер не трогается. На сервере ожидаются клон репозитория
-в `~/mc-modpack-assistant`, сервер в `~/server` со службой systemd `minecraft` и включённый RCON
-(`deploy/mc` — консоль через RCON: `mc list`, `mc say …`).
+перезапускается только он (мод поднимает его сам), сервер не трогается. Поменялись `deploy/server` или
+`deploy/status` — `mc-update` применяет их сам (Minecraft при этом не перезапускается). `deploy/mc` — консоль
+через RCON: `mc list`, `mc say …`.
+
+## Свой сервер (Ubuntu)
+
+`deploy/server/setup-server.sh` настраивает чистую Ubuntu 24.04 и приводит уже настроенную к тому, что описано
+в репозитории (идемпотентно; сервер Minecraft никогда не перезапускает):
+
+- Java 17, uv, Claude Code, клон репозитория в `~/mc-modpack-assistant`, swap 4 ГБ;
+- служба `minecraft` (`~/bin/mc-start`: память, флаги G1, UTF-8), автозапуск при загрузке, перезапуск при падении;
+- `needrestart` не перезапускает сервер после автообновлений Ubuntu;
+- страница статуса (`deploy/status`, служба `mc-status` на `127.0.0.1:8080`): онлайн, игроки, адрес, сборка;
+  название и описание — из MOTD, адрес — `telegram.status.address`;
+- Traefik перед ней: HTTPS с Let's Encrypt для `--domain` (A-запись домена → IP сервера), по голому IP — http;
+- ufw: открыты только 22, 80, 443, 25565 (RCON — только локально).
+
+```bash
+# первый раз, от пользователя с sudo:
+ssh user@host 'bash -s -- --domain mc.example.com --memory 7G' < deploy/server/setup-server.sh
+# потом (параметры запомнены в ~/.config/minecraft-host.env):
+~/mc-modpack-assistant/deploy/server/setup-server.sh
+```
+
+Затем скопировать сервер в `~/server` и положить секреты (скрипт напомнит, чего не хватает):
+токен Claude — `claude setup-token` на своём ПК → `CLAUDE_CODE_OAUTH_TOKEN=…` в `~/.config/minecraft.env`
+(chmod 600); в `server.properties` — `enable-rcon=true` и случайный `rcon.password`; в
+`config/modpack-bridge.json` — `brain.dir` (`/home/<user>/mc-modpack-assistant/brain`) и токен Telegram.
+Запуск: `sudo systemctl start minecraft`.
 
 ## Запуск brain вручную
 
