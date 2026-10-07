@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Консоль сервера через RCON: `mc list`, `mc say privet`, без аргументов — интерактивно.
+
+Пароль и порт берёт из server.properties (папка сервера — $SERVER_DIR, по умолчанию ~/server).
+"""
+import os, socket, struct, sys
+from pathlib import Path
+
+SERVER_DIR = Path(os.environ.get("SERVER_DIR", Path.home() / "server"))
+
+def props():
+    out = {}
+    for line in (SERVER_DIR / "server.properties").read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+def packet(sock, req_id, kind, body):
+    data = struct.pack("<ii", req_id, kind) + body.encode("utf-8") + b"\x00\x00"
+    sock.sendall(struct.pack("<i", len(data)) + data)
+
+def read(sock):
+    def exact(n):
+        buf = b""
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("RCON закрыл соединение")
+            buf += chunk
+        return buf
+    (length,) = struct.unpack("<i", exact(4))
+    req_id, _ = struct.unpack("<ii", exact(8))
+    return req_id, exact(length - 8)[:-2].decode("utf-8", "replace")
+
+def main():
+    p = props()
+    sock = socket.create_connection(("127.0.0.1", int(p.get("rcon.port", 25575))), timeout=15)
+    packet(sock, 1, 3, p["rcon.password"])
+    if read(sock)[0] == -1:
+        sys.exit("RCON: неверный пароль")
+    def run(cmd):
+        packet(sock, 2, 2, cmd)
+        packet(sock, 3, 2, "")  # маркер конца длинного ответа
+        parts = []
+        while True:
+            req_id, body = read(sock)
+            if req_id == 3:
+                break
+            parts.append(body)
+        text = "".join(parts).strip()
+        if text:
+            print(text)
+    if len(sys.argv) > 1:
+        run(" ".join(sys.argv[1:]))
+        return
+    print("Консоль сервера (RCON). Выход: Ctrl+D или exit.")
+    while True:
+        try:
+            cmd = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if cmd in ("exit", "quit"):
+            return
+        if cmd:
+            run(cmd.lstrip("/"))
+
+if __name__ == "__main__":
+    main()

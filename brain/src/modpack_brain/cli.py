@@ -242,6 +242,7 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     from .bridge import Bridge
     from .game import GameAi
     from .telegram.bot import TelegramBot
+    from .telegram.status import StatusBoard
 
     if settings.telegram_bot_token is None:
         sys.exit("Не задан токен Telegram: telegram.token в config/modpack-bridge.json сервера")
@@ -256,11 +257,23 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
         questions_per_user_per_day=settings.questions_per_user_per_day,
         pack_name=settings.pack_name,
     )
+    status: StatusBoard | None = None
+    if settings.status_pinned and settings.events_chat is not None:
+        status = StatusBoard(
+            telegram.bot,
+            settings.events_chat,
+            settings.server_dir,
+            pack=settings.pack_name,
+            address=settings.status_address,
+            panel_url=settings.status_panel_url,
+        )
 
     async def on_event(event: dict[str, Any]) -> None:
         log.info("событие: %s", {k: v for k, v in event.items() if k != "type"})
         if text := format_event(event):
             await telegram.notify(text, silent=event.get("event") in SILENT_EVENTS)
+        if status is not None:
+            await status.on_event(event)
 
     async def on_ai_question(message: dict[str, Any]) -> None:
         await game.handle(message)
@@ -286,11 +299,15 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
     )
     telegram.bridge = bridge
     live.bridge = bridge
+    if status is not None:
+        status.bridge = bridge
     if settings.resolve_bridge_token() is None:
         log.warning("мост: токена пока нет — он появится после первого запуска сервера с модом")
     await bridge.start()
 
     await telegram.setup()
+    if status is not None:
+        await status.start()
     dispatcher = Dispatcher()
     dispatcher.include_router(telegram.router)
     polling = asyncio.create_task(dispatcher.start_polling(telegram.bot, handle_signals=False))
@@ -305,6 +322,9 @@ async def _run(settings: Settings, *, exit_on_stdin_eof: bool = False) -> None:
             await dispatcher.stop_polling()
         await polling
     finally:
+        if status is not None:
+            # brain выходит только вместе с сервером (остановка или краш) — значит, сервер выключен.
+            await status.stop(offline=True)
         await bridge.stop()
         await telegram.bot.session.close()
 

@@ -32,4 +32,17 @@ class BridgeConfigTest {
 		assertTrue(config.events.death);
 		assertTrue(Files.readString(path).contains("joinLeave"));
 	}
+
+	@Test
+	void keepsStatusSectionOfOlderTelegramConfig(@TempDir Path dir) throws Exception {
+		Path path = dir.resolve("modpack-bridge.json");
+		Files.writeString(path, "{\"telegram\": {\"token\": \"x\"}}", StandardCharsets.UTF_8);
+		assertTrue(BridgeConfig.loadOrCreate(path).telegram.status.pinned);
+		Files.writeString(path, "{\"telegram\": {\"status\": {\"panelUrl\": \"https://example.com\", \"pinned\": false}}}",
+				StandardCharsets.UTF_8);
+		BridgeConfig config = BridgeConfig.loadOrCreate(path);
+		assertEquals("https://example.com", config.telegram.status.panelUrl);
+		assertFalse(config.telegram.status.pinned);
+		assertTrue(Files.readString(path).contains("\"address\""));
+	}
 }

@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Обновление на сервере (запускает deploy.sh по ssh, можно и руками):
+#   код brain — git pull; новый jar мода — из ~/deploy (кладёт туда deploy.sh); затем перезапуск, если нужен.
+#
+#   mc-update               перезапуск сервера с предупреждением игрокам за 60 с
+#   mc-update --now         сразу
+#   mc-update --when-empty  дождаться, пока все выйдут
+#   mc-update --no-restart  только обновить файлы (применятся при следующем перезапуске)
+#
+# Изменился только brain — перезапускается только он (мод сам поднимет его заново), сервер работает дальше.
+set -euo pipefail
+
+REPO="${REPO_DIR:-$HOME/mc-modpack-assistant}"
+SERVER="${SERVER_DIR:-$HOME/server}"
+SERVICE="${MC_SERVICE:-minecraft}"
+INBOX="$HOME/deploy"
+MC="$(dirname "$0")/mc"
+export PATH="$HOME/.local/bin:$PATH"
+
+mode=warn
+case "${1:-}" in
+  "") ;;
+  --now) mode=now ;;
+  --when-empty) mode=empty ;;
+  --no-restart) mode=none ;;
+  *) echo "usage: mc-update [--now|--when-empty|--no-restart]" >&2; exit 2 ;;
+esac
+
+players() {
+  # «There are N of a max of M players online: …»; сервер не отвечает — считаем, что игроков нет.
+  "$MC" list 2>/dev/null | sed -n 's/^There are \([0-9]*\) of.*/\1/p' | head -1 | grep . || echo 0
+}
+
+# --- код ---
+old=$(git -C "$REPO" rev-parse HEAD)
+git -C "$REPO" pull --ff-only -q
+new=$(git -C "$REPO" rev-parse HEAD)
+brain_changed=false
+if [ "$old" != "$new" ]; then
+  echo "код: ${old:0:7} → ${new:0:7}"
+  git -C "$REPO" log --oneline "$old..$new" | sed 's/^/  /'
+  git -C "$REPO" diff --quiet "$old" "$new" -- brain || brain_changed=true
+else
+  echo "код: без изменений (${new:0:7})"
+fi
+(cd "$REPO/brain" && uv sync -q --frozen)
+
+# --- мод ---
+server_restart=false
+jar=$(ls "$INBOX"/modpack-bridge-*.jar 2>/dev/null | head -1 || true)
+if [ -n "$jar" ]; then
+  mkdir -p "$SERVER/mods-backup"
+  for installed in "$SERVER"/mods/modpack-bridge-*.jar; do
+    [ -e "$installed" ] && mv "$installed" "$SERVER/mods-backup/"
+  done
+  mv "$jar" "$SERVER/mods/"
+  echo "мод: установлен $(basename "$jar") (старый — в mods-backup/)"
+  server_restart=true
+fi
+
+# --- перезапуск ---
+if [ "$mode" = none ]; then
+  echo "перезапуск пропущен (--no-restart)"
+  exit 0
+fi
+
+if [ "$server_restart" = false ]; then
+  if [ "$brain_changed" = true ]; then
+    # Мод (0.7.2+) перезапускает brain сам через несколько секунд — уже с новым кодом.
+    pkill -TERM -f "modpack-brain run" && echo "brain: перезапущен с новым кодом" || echo "brain: не запущен"
+  else
+    echo "перезапуск не нужен"
+  fi
+  exit 0
+fi
+
+if [ "$mode" = empty ]; then
+  echo "жду, пока все выйдут…"
+  while [ "$(players)" -gt 0 ]; do sleep 30; done
+elif [ "$mode" = warn ] && [ "$(players)" -gt 0 ]; then
+  "$MC" say "Restart servera cherez 60 sek (obnovlenie)" >/dev/null
+  sleep 50
+  "$MC" say "Restart cherez 10 sek" >/dev/null
+  sleep 10
+fi
+echo "сервер: перезапуск…"
+sudo systemctl restart "$SERVICE"
+sleep 15  # пока новый процесс не заменил logs/latest.log, там ещё «Done» от прошлого запуска
+for _ in $(seq 1 120); do
+  if grep -q "Done (" "$SERVER/logs/latest.log" 2>/dev/null; then
+    echo "сервер: запущен"
+    grep -E "Modpack Bridge [0-9.]+ started" "$SERVER/logs/latest.log" | tail -1 | sed 's/.*INFO\]: /  /'
+    exit 0
+  fi
+  sleep 5
+done
+echo "сервер: не дождался запуска за 10 минут, смотри $SERVER/logs/latest.log" >&2
+exit 1

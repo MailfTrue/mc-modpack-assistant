@@ -1,1 +1,4 @@
 *.bat text eol=crlf
+deploy/mc text eol=lf
+deploy/mc-update text eol=lf
+*.sh text eol=lf

@@ -41,10 +41,14 @@ def map_server_config(data: dict[str, Any]) -> dict[str, Any]:
     """Поля конфига мода → поля Settings. Пустые значения пропускаем, чтобы работали умолчания."""
     telegram = data.get("telegram") or {}
     llm = data.get("llm") or {}
+    status = telegram.get("status") or {}
     out: dict[str, Any] = {
         "telegram_bot_token": telegram.get("token"),
         "allowed_chat_ids": telegram.get("allowedChatIds"),
         "events_chat_id": telegram.get("eventsChatId"),
+        "status_pinned": status.get("pinned"),
+        "status_address": status.get("address"),
+        "status_panel_url": status.get("panelUrl"),
         "pack_name": llm.get("packName"),
         "pack_notes": llm.get("packNotes"),
         "llm_model": llm.get("model"),
@@ -81,6 +85,10 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr | None = None
     allowed_chat_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     events_chat_id: int | None = None
+    # Закреплённое сообщение со статусом сервера в чате событий
+    status_pinned: bool = True
+    status_address: str = ""
+    status_panel_url: str = ""
 
     # Сервер Minecraft
     server_dir: Path

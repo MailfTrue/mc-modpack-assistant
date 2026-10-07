@@ -42,6 +42,16 @@ public final class BridgeConfig {
 		public List<Long> allowedChatIds = new ArrayList<>();
 		/** Куда слать события сервера; null — первый из allowedChatIds. */
 		public Long eventsChatId;
+		public Status status = new Status();
+	}
+
+	/** Закреплённое сообщение со статусом сервера в чате событий; бот его обновляет. */
+	public static final class Status {
+		public boolean pinned = true;
+		/** Адрес для подключения, показывается в сообщении. */
+		public String address = "";
+		/** Ссылка для кнопки «Открыть панель»; пусто — без кнопки. */
+		public String panelUrl = "";
 	}
 
 	public static final class Llm {
@@ -81,6 +91,9 @@ public final class BridgeConfig {
 		}
 		if (config.telegram == null) {
 			config.telegram = new Telegram();
+		}
+		if (config.telegram.status == null) {
+			config.telegram.status = new Status();
 		}
 		if (config.llm == null) {
 			config.llm = new Llm();

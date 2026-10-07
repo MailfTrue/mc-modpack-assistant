@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,9 @@ import org.slf4j.LoggerFactory;
  * brain как дочерний процесс сервера. Живёт, пока жив сервер:
  * при остановке закрываем его stdin (brain сам корректно завершается), а если сервер упал —
  * stdin закрывает ОС, и brain тоже выходит. Вывод — в logs/modpack-brain.log.
+ *
+ * Если brain завершился сам (упал или его остановили при деплое, чтобы подхватить новый код),
+ * мод запускает его снова: через 3 с, при повторных падениях — с паузой до 5 минут.
  */
 public final class BrainProcess {
 	private static final Logger LOG = LoggerFactory.getLogger("modpack_bridge");
@@ -24,6 +28,13 @@ public final class BrainProcess {
 	private Process process;
 	private OutputStream stdin;
 	private volatile boolean stopping;
+	private long startedAt;
+	private long restartDelayMs = MIN_RESTART_DELAY_MS;
+
+	private static final long MIN_RESTART_DELAY_MS = 3_000;
+	private static final long MAX_RESTART_DELAY_MS = 5 * 60_000;
+	/** Проработал дольше — считаем, что это не цикл падений, и пауза снова минимальная. */
+	private static final long STABLE_RUN_MS = 10 * 60_000;
 
 	private BrainProcess(List<String> command, Path dir, Path log) {
 		this.command = command;
@@ -57,7 +68,10 @@ public final class BrainProcess {
 		return new BrainProcess(command, dir, serverDir.resolve("logs").resolve("modpack-brain.log"));
 	}
 
-	public void start() {
+	public synchronized void start() {
+		if (stopping) {
+			return;
+		}
 		try {
 			Files.createDirectories(log.getParent());
 			ProcessBuilder builder = new ProcessBuilder(command)
@@ -69,21 +83,37 @@ public final class BrainProcess {
 			stdin = process.getOutputStream();
 		} catch (IOException e) {
 			LOG.error("cannot start brain ({} in {}): {}", String.join(" ", command), dir, e.getMessage());
+			scheduleRestart();
 			return;
 		}
+		startedAt = System.currentTimeMillis();
 		LOG.info("brain started (pid {}), log: {}", process.pid(), log);
 		process.onExit().thenAccept(p -> {
 			if (!stopping) {
-				LOG.error("brain exited unexpectedly with code {}, see {}", p.exitValue(), log);
+				LOG.warn("brain exited with code {}, see {}", p.exitValue(), log);
+				scheduleRestart();
 			}
 		});
 	}
 
+	private synchronized void scheduleRestart() {
+		if (stopping) {
+			return;
+		}
+		if (System.currentTimeMillis() - startedAt > STABLE_RUN_MS) {
+			restartDelayMs = MIN_RESTART_DELAY_MS;
+		}
+		long delay = restartDelayMs;
+		restartDelayMs = Math.min(restartDelayMs * 2, MAX_RESTART_DELAY_MS);
+		LOG.info("restarting brain in {} s", delay / 1000);
+		CompletableFuture.delayedExecutor(delay, TimeUnit.MILLISECONDS).execute(this::start);
+	}
+
 	public void stop() {
+		stopping = true;
 		if (process == null || !process.isAlive()) {
 			return;
 		}
-		stopping = true;
 		try {
 			stdin.close();
 		} catch (IOException ignored) {
